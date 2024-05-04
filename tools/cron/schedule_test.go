@@ -356,7 +356,7 @@ func TestNewSchedule(t *testing.T) {
 		encodedStr := string(encoded)
 
 		if encodedStr != s.expectSchedule {
-			t.Fatalf("[%d: %s] Expected \n%s, \ngot \n%s",i, s.cronExpr, s.expectSchedule, encodedStr)
+			t.Fatalf("[%d: %s] Expected \n%s, \ngot \n%s", i, s.cronExpr, s.expectSchedule, encodedStr)
 		}
 	}
 }
