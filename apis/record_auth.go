@@ -1,13 +1,20 @@
 package apis
 
 import (
+	"bytes"
+	"crypto/sha1"
+	b64 "encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/color"
 	"log/slog"
 	"net/http"
+	url "net/url"
 	"sort"
+	"strconv"
 
+	"github.com/creachadair/otp"
 	"github.com/labstack/echo/v5"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -20,6 +27,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/search"
 	"github.com/pocketbase/pocketbase/tools/security"
 	"github.com/pocketbase/pocketbase/tools/subscriptions"
+	"github.com/skip2/go-qrcode"
 	"golang.org/x/oauth2"
 )
 
@@ -38,6 +46,8 @@ func bindRecordAuthApi(app core.App, rg *echo.Group) {
 		LoadCollectionContext(app, models.CollectionTypeAuth),
 	)
 	subGroup.GET("/auth-methods", api.authMethods)
+	subGroup.GET("/otp/get", api.optQrCode, RequireSameContextRecordAuth())
+	subGroup.GET("/otp/:otp", api.optVerification, RequireSameContextRecordAuth())
 	subGroup.POST("/auth-refresh", api.authRefresh, RequireSameContextRecordAuth())
 	subGroup.POST("/auth-with-oauth2", api.authWithOAuth2)
 	subGroup.POST("/auth-with-password", api.authWithPassword)
@@ -53,6 +63,90 @@ func bindRecordAuthApi(app core.App, rg *echo.Group) {
 
 type recordAuthApi struct {
 	app core.App
+}
+
+func (api *recordAuthApi) optQrCode(c echo.Context) error {
+	record, _ := c.Get(ContextAuthRecordKey).(*models.Record)
+	if record == nil {
+		return NewNotFoundError("Missing auth record context.", nil)
+	}
+	digits := 6
+	period := 30
+	if i, err := strconv.Atoi(c.QueryParamDefault("digits", "6")); err == nil {
+		digits = i
+	}
+	if i, err := strconv.Atoi(c.QueryParamDefault("period", "30")); err == nil {
+		period = i
+	}
+	h := sha1.New()
+	h.Write([]byte(api.app.Settings().Meta.AppName + "|" + record.Id))
+
+	optData := fmt.Sprintf(
+		"otpauth://totp/%s?secret=%s&algorithm=SHA1&digits=%d&period=%d",
+		url.QueryEscape(api.app.Settings().Meta.AppName),
+		url.QueryEscape(b64.StdEncoding.EncodeToString(h.Sum([]byte(record.Email())))),
+		digits,
+		period,
+	)
+	qr, err := qrcode.New(optData, qrcode.Highest)
+	if err != nil {
+		return NewApiError(500, "Unable to generate QrCode", err)
+	}
+	qr.BackgroundColor = color.White
+	qr.ForegroundColor = color.Black
+	res, err := qr.PNG(256)
+	if err != nil {
+		return NewApiError(500, "Unable to generate QrCode", err)
+	}
+	buffer := &bytes.Buffer{}
+	encoder := json.NewEncoder(buffer)
+	encoder.SetEscapeHTML(false)
+	err = encoder.Encode(map[string]interface{}{
+		"type": "totp",
+		"href": optData,
+		"uri":  fmt.Sprintf("data:image/png;base64,%s", b64.StdEncoding.EncodeToString(res)),
+	})
+	if err == nil {
+		c.Request().Header.Add("content-type", "application/json")
+		c.Response().Status = 200
+		c.Response().Write(buffer.Bytes())
+	}
+	return err
+}
+
+func (api *recordAuthApi) optVerification(c echo.Context) error {
+	record, _ := c.Get(ContextAuthRecordKey).(*models.Record)
+	if record == nil {
+		return NewNotFoundError("Missing auth record context.", nil)
+	}
+
+	digits := 6
+	if i, err := strconv.Atoi(c.QueryParamDefault("digits", "6")); err == nil {
+		digits = i
+	}
+	fixedTime := func(z uint64) func() uint64 { return func() uint64 { return z } }
+	cfg := otp.Config{
+		Digits: digits,
+		// By default, time-based OTP generation uses time.Now.  You can plug in
+		// your own function to control how time steps are generated.
+		// This example uses a fixed time step so the output will be consistent.
+		TimeStep: fixedTime(1),
+	}
+	h := sha1.New()
+	h.Write([]byte(api.app.Settings().Meta.AppName + "|" + record.Id))
+
+	// 2FA setup tools often present the shared secret as a base32 string.
+	// ParseKey decodes this format.
+	if err := cfg.ParseKey(b64.StdEncoding.EncodeToString(h.Sum([]byte(record.Email())))); err != nil {
+		return NewApiError(500, "Unable to parse OTP Key.", err)
+	}
+
+	otp := c.PathParam("otp")
+	if cfg.TOTP() != otp {
+		return NewUnauthorizedError(fmt.Sprintf("Unable to validate OTP : %s.", otp), fmt.Errorf("%s is invalid", otp))
+	}
+	c.JSON(200, cfg.TOTP() == otp)
+	return nil
 }
 
 func (api *recordAuthApi) authRefresh(c echo.Context) error {

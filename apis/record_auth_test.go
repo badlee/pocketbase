@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creachadair/otp"
 	"github.com/labstack/echo/v5"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/daos"
@@ -350,6 +351,103 @@ func TestRecordAuthWithPassword(t *testing.T) {
 			ExpectedEvents: map[string]int{
 				"OnRecordBeforeAuthWithPasswordRequest": 1,
 				"OnRecordAfterAuthWithPasswordRequest":  1,
+			},
+		},
+	}
+
+	for _, scenario := range scenarios {
+		scenario.Test(t)
+	}
+}
+
+func TestRecordOTP(t *testing.T) {
+	t.Parallel()
+	fixedTime := func(z uint64) func() uint64 { return func() uint64 { return z } }
+	cfg := otp.Config{
+		Digits: 6,
+		// By default, time-based OTP generation uses time.Now.  You can plug in
+		// your own function to control how time steps are generated.
+		// This example uses a fixed time step so the output will be consistent.
+		TimeStep: fixedTime(1),
+	}
+
+	cfg.ParseKey("dGVzdEBleGFtcGxlLmNvbUg2IpjItmCuFVqEVGoLXF3JFSlN")
+
+	scenarios := []tests.ApiScenario{
+		{
+			Name:            "unauthorized",
+			Method:          http.MethodGet,
+			Url:             "/api/collections/users/otp/get",
+			ExpectedStatus:  401,
+			ExpectedContent: []string{`"data":{}`},
+		},
+		{
+			Name:   "admin",
+			Method: http.MethodGet,
+			Url:    "/api/collections/users/otp/get",
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
+			},
+			ExpectedStatus:  401,
+			ExpectedContent: []string{`"data":{}`},
+		},
+		{
+			Name:   "auth record + not an auth collection",
+			Method: http.MethodGet,
+			Url:    "/api/collections/demo1/otp/get",
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjRxMXhsY2xtZmxva3UzMyIsInR5cGUiOiJhdXRoUmVjb3JkIiwiY29sbGVjdGlvbklkIjoiX3BiX3VzZXJzX2F1dGhfIiwiZXhwIjoyMjA4OTg1MjYxfQ.UwD8JvkbQtXpymT09d7J6fdA0aP9g4FJ1GPh_ggEkzc",
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+		},
+		{
+			Name:   "auth record + different auth collection",
+			Method: http.MethodGet,
+			Url:    "/api/collections/clients/otp/get",
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjRxMXhsY2xtZmxva3UzMyIsInR5cGUiOiJhdXRoUmVjb3JkIiwiY29sbGVjdGlvbklkIjoiX3BiX3VzZXJzX2F1dGhfIiwiZXhwIjoyMjA4OTg1MjYxfQ.UwD8JvkbQtXpymT09d7J6fdA0aP9g4FJ1GPh_ggEkzc",
+			},
+			ExpectedStatus:  403,
+			ExpectedContent: []string{`"data":{}`},
+		},
+		{
+			Name:   "auth record + get otp data",
+			Method: http.MethodGet,
+			Url:    "/api/collections/users/otp/get",
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjRxMXhsY2xtZmxva3UzMyIsInR5cGUiOiJhdXRoUmVjb3JkIiwiY29sbGVjdGlvbklkIjoiX3BiX3VzZXJzX2F1dGhfIiwiZXhwIjoyMjA4OTg1MjYxfQ.UwD8JvkbQtXpymT09d7J6fdA0aP9g4FJ1GPh_ggEkzc",
+			},
+			ExpectedStatus: 200,
+			ExpectedContent: []string{
+				`"type":`,
+				`"href":"otpauth://totp/acme_test?secret=dGVzdEBleGFtcGxlLmNvbUg2IpjItmCuFVqEVGoLXF3JFSlN&algorithm=SHA1&digits=6&period=30",`,
+				`"uri":`,
+			},
+		},
+		{
+			Name:   "invalid otp record",
+			Method: http.MethodGet,
+			Url:    "/api/collections/users/otp/0000",
+			RequestHeaders: map[string]string{
+				"content-type":  "application/json",
+				"Authorization": "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjRxMXhsY2xtZmxva3UzMyIsInR5cGUiOiJhdXRoUmVjb3JkIiwiY29sbGVjdGlvbklkIjoiX3BiX3VzZXJzX2F1dGhfIiwiZXhwIjoyMjA4OTg1MjYxfQ.UwD8JvkbQtXpymT09d7J6fdA0aP9g4FJ1GPh_ggEkzc",
+			},
+			ExpectedStatus:  401,
+			ExpectedContent: []string{`"data":{}`},
+			Body:            strings.NewReader(`{"otp":"0000"}`),
+		},
+		{
+			Name:   "valid otp record",
+			Method: http.MethodGet,
+			Url:    "/api/collections/users/otp/" + cfg.TOTP(),
+			RequestHeaders: map[string]string{
+				"content-type":  "application/json",
+				"Authorization": "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjRxMXhsY2xtZmxva3UzMyIsInR5cGUiOiJhdXRoUmVjb3JkIiwiY29sbGVjdGlvbklkIjoiX3BiX3VzZXJzX2F1dGhfIiwiZXhwIjoyMjA4OTg1MjYxfQ.UwD8JvkbQtXpymT09d7J6fdA0aP9g4FJ1GPh_ggEkzc",
+			},
+			ExpectedStatus: 200,
+			ExpectedContent: []string{
+				`true`,
 			},
 		},
 	}
