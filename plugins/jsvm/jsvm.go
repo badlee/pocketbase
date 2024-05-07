@@ -24,7 +24,6 @@ import (
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/process"
-	"github.com/dop251/goja_nodejs/require"
 	"github.com/fatih/color"
 	"github.com/fsnotify/fsnotify"
 	"github.com/labstack/echo/v5"
@@ -139,15 +138,14 @@ func Register(app core.App, config Config) error {
 
 		return nil
 	})
-
-	if err := p.registerMigrations(); err != nil {
-		return fmt.Errorf("registerMigrations: %w", err)
+	err := p.registerMigrations()
+	if err != nil {
+		return (fmt.Errorf("registerMigrations: %w", err))
 	}
-
-	if err := p.registerHooks(); err != nil {
-		return fmt.Errorf("registerHooks: %w", err)
+	err = p.registerHooks()
+	if err != nil {
+		return (fmt.Errorf("registerHooks: %w", err))
 	}
-
 	return nil
 }
 
@@ -163,37 +161,38 @@ func (p *plugin) registerMigrations() error {
 	if err != nil {
 		return err
 	}
-
-	registry := new(require.Registry) // this can be shared by multiple runtimes
-
-	for file, content := range files {
-		vm := goja.New()
-		registry.Enable(vm)
-		console.Enable(vm)
-		process.Enable(vm)
-		baseBinds(vm)
-		dbxBinds(vm)
-		tokensBinds(vm)
-		securityBinds(vm)
-		osBinds(vm)
-		filepathBinds(vm)
-		httpClientBinds(vm)
-
-		vm.Set("migrate", func(up, down func(db dbx.Builder) error) {
-			m.AppMigrations.Register(up, down, file)
-		})
-
-		if p.config.OnInit != nil {
-			p.config.OnInit(vm)
+	var _err = make(chan error)
+	go func() {
+		// vm := goja.New()
+		for file, content := range files {
+			loop := NewEventLoop()
+			loop.Stop()
+			baseBinds(loop.vm)
+			dbxBinds(loop.vm)
+			tokensBinds(loop.vm)
+			securityBinds(loop.vm)
+			osBinds(loop.vm)
+			filepathBinds(loop.vm)
+			httpClientBinds(loop.vm)
+			if p.config.OnInit != nil {
+				p.config.OnInit(loop.vm)
+			}
+			loop.vm.Set("migrate", func(up, down func(db dbx.Builder) error) {
+				m.AppMigrations.Register(up, down, file)
+			})
+			loop.RunOnLoop(func(vm *goja.Runtime) {
+				_, err := vm.RunString(string(content))
+				if err != nil {
+					_err <- fmt.Errorf("failed to run migration %s: %w", file, err)
+					return
+				}
+			})
 		}
+		_err <- nil
+		// defer loop.Stop()
+	}()
 
-		_, err := vm.RunString(string(content))
-		if err != nil {
-			return fmt.Errorf("failed to run migration %s: %w", file, err)
-		}
-	}
-
-	return nil
+	return <-_err
 }
 
 // registerHooks registers the JS app hooks loader.
@@ -244,11 +243,11 @@ func (p *plugin) registerHooks() error {
 	})
 
 	// safe to be shared across multiple vms
-	requireRegistry := new(require.Registry)
+	// requireRegistry := new(require.Registry)
 	templateRegistry := template.NewRegistry()
 
 	sharedBinds := func(vm *goja.Runtime) {
-		requireRegistry.Enable(vm)
+		// requireRegistry.Enable(vm)
 		console.Enable(vm)
 		process.Enable(vm)
 
@@ -274,21 +273,36 @@ func (p *plugin) registerHooks() error {
 	}
 
 	// initiliaze the executor vms
+	// executors := newPool(p.config.HooksPoolSize, func() *goja.Runtime {
+	// 	return loader
+	// })
+	// executors := newPool(p.config.HooksPoolSize, func() *goja.Runtime {
+	// 	executor := goja.New()
+	// 	sharedBinds(executor)
+	// 	return executor
+	// })
 	executors := newPool(p.config.HooksPoolSize, func() *goja.Runtime {
-		executor := goja.New()
-		sharedBinds(executor)
-		return executor
+		var vm = make(chan *goja.Runtime)
+		go func() {
+			loop := NewEventLoop()
+			loop.Stop()
+			loop.RunOnLoop(func(r *goja.Runtime) {
+				sharedBinds(r)
+				// fmt.Println("<< SEND VM")
+				vm <- r
+			})
+		}()
+		// fmt.Println("WAIT OK")
+		var ret = <-vm
+		// fmt.Println("OK")
+		return ret
 	})
 
 	// initialize the loader vm
-	loader := goja.New()
-	sharedBinds(loader)
-	hooksBinds(p.app, loader, executors)
-	cronBinds(p.app, loader, executors)
-	routerBinds(p.app, loader, executors)
-
+	// loader := goja.New()
+	_err := make(chan error)
 	for file, content := range files {
-		func() {
+		go func(file string, content []byte) {
 			defer func() {
 				if err := recover(); err != nil {
 					fmtErr := fmt.Errorf("Failed to execute %s:\n - %v", file, err)
@@ -300,14 +314,29 @@ func (p *plugin) registerHooks() error {
 					}
 				}
 			}()
-
-			_, err := loader.RunString(string(content))
-			if err != nil {
-				panic(err)
-			}
-		}()
+			loop := NewEventLoop()
+			loop.Stop()
+			loop.RunOnLoop(func(vm *goja.Runtime) {
+				sharedBinds(vm)
+				hooksBinds(p.app, vm, executors)
+				cronBinds(p.app, vm, executors)
+				routerBinds(p.app, vm, executors)
+				_, err := vm.RunString(string(content))
+				if err != nil {
+					_err <- err
+				}
+				_err <- nil
+			})
+		}(file, content)
 	}
+	for i := len(files); i > 0; {
+		if err = <-_err; err != nil {
+			return err
+		} else {
+			i--
+		}
 
+	}
 	return nil
 }
 
