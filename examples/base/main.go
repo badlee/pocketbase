@@ -12,6 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/plugins/ghupdate"
 	"github.com/pocketbase/pocketbase/plugins/jsvm"
+	"github.com/pocketbase/pocketbase/plugins/luavm"
 	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 )
 
@@ -94,6 +95,14 @@ func main() {
 
 	// load jsvm (hooks and migrations)
 	jsvm.MustRegister(app, jsvm.Config{
+		MigrationsDir: migrationsDir,
+		HooksDir:      hooksDir,
+		HooksWatch:    hooksWatch,
+		HooksPoolSize: hooksPool,
+	})
+
+	// load jsvm (hooks and migrations)
+	luavm.MustRegister(app, luavm.Config{
 		MigrationsDir: migrationsDir,
 		HooksDir:      hooksDir,
 		HooksWatch:    hooksWatch,

@@ -36,6 +36,8 @@ require (
 )
 
 require (
+	github.com/arnodel/golua v0.0.0-20230215163904-e0b5347eaaa1 // indirect
+	github.com/arnodel/strftime v0.1.6 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/aws/aws-sdk-go v1.51.11 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.2 // indirect
