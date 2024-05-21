@@ -170,6 +170,7 @@ type PocketBase = excludeHooks<ORIGINAL_POCKETBASE>
  * @group PocketBase
  */
 declare var $app: PocketBase
+declare var App: PocketBase
 
 /**
  * ` + "`$template`" + ` is a global helper to load and cache HTML templates on the fly.
@@ -191,6 +192,7 @@ declare var $app: PocketBase
  * @namespace
  * @group PocketBase
  */
+declare var Template: template.Registry
 declare var $template: template.Registry
 
 /**
@@ -550,6 +552,8 @@ declare namespace $dbx {
   export let between:    dbx.between
   export let notBetween: dbx.notBetween
 }
+// Alias
+import DB = $dbx
 
 // -------------------------------------------------------------------
 // tokensBinds
@@ -573,7 +577,8 @@ declare namespace $tokens {
   let recordChangeEmailToken:   tokens.newRecordChangeEmailToken
   let recordFileToken:          tokens.newRecordFileToken
 }
-
+// Alias
+import Tokens = $tokens
 // -------------------------------------------------------------------
 // mailsBinds
 // -------------------------------------------------------------------
@@ -590,7 +595,8 @@ declare namespace $mails {
   let sendRecordVerification:  mails.sendRecordVerification
   let sendRecordChangeEmail:   mails.sendRecordChangeEmail
 }
-
+// Alias
+import Mail = $mails
 // -------------------------------------------------------------------
 // securityBinds
 // -------------------------------------------------------------------
@@ -627,6 +633,9 @@ declare namespace $security {
   export function parseJWT(token: string, verificationKey: string): _TygojaDict
 }
 
+// Alias
+import Security = $security
+
 // -------------------------------------------------------------------
 // filesystemBinds
 // -------------------------------------------------------------------
@@ -659,6 +668,8 @@ declare namespace $filesystem {
   export function fileFromUrl(url: string, secTimeout?: number): filesystem.File
 }
 
+// Alias
+import Filesystem = $filesystem
 // -------------------------------------------------------------------
 // filepathBinds
 // -------------------------------------------------------------------
@@ -686,6 +697,8 @@ declare namespace $filepath {
   export let walk:      filepath.walk
   export let walkDir:   filepath.walkDir
 }
+// Alias
+import Filepath = $filepath
 
 // -------------------------------------------------------------------
 // osBinds
@@ -734,6 +747,10 @@ declare namespace $os {
   export let remove:    os.remove
   export let removeAll: os.removeAll
 }
+
+// Alias
+import System = $os
+import Os = $os
 
 // -------------------------------------------------------------------
 // formsBinds
@@ -1000,6 +1017,9 @@ declare namespace $apis {
   let enrichRecords:             apis.enrichRecords
 }
 
+// Alias
+import Api = $apis
+
 // -------------------------------------------------------------------
 // httpClientBinds
 // -------------------------------------------------------------------
@@ -1052,6 +1072,10 @@ declare namespace $http {
     json:       any,
   };
 }
+
+// Alias
+import Http = $http
+
 
 // -------------------------------------------------------------------
 // migrate only
@@ -1141,7 +1165,7 @@ func main() {
 	result = fmt.Sprintf("// %d\n%s", time.Now().Unix(), result)
 
 	parentDir := filepath.Dir(filename)
-	typesFile := filepath.Join(parentDir, "generated", "types.d.ts")
+	typesFile := filepath.Join(parentDir, "generated", "types_lua.d.ts")
 
 	if err := os.WriteFile(typesFile, []byte(result), 0644); err != nil {
 		log.Fatal(err)

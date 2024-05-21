@@ -27,6 +27,8 @@ func ProcessRequire(loop *EventLoop) func(runtime *goja.Runtime, module *goja.Ob
 
 		o := module.Get("exports").(*goja.Object)
 		o.Set("env", p.env)
+		o.Set("args", os.Args)
+		o.Set("cwd", os.Getwd)
 		o.Set("stop", func(code int) {
 			if loop.running {
 				loop.Stop()

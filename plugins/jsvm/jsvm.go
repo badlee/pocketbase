@@ -32,6 +32,8 @@ import (
 	m "github.com/pocketbase/pocketbase/migrations"
 	"github.com/pocketbase/pocketbase/plugins/jsvm/internal/types/generated"
 	"github.com/pocketbase/pocketbase/tools/template"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -130,7 +132,7 @@ func Register(app core.App, config Config) error {
 		p.config.TypesDir = app.DataDir()
 	}
 
-	p.app.OnAfterBootstrap().Add(func(e *core.BootstrapEvent) error {
+	p.app.OnBeforeBootstrap().Add(func(e *core.BootstrapEvent) error {
 		// ensure that the user has the latest types declaration
 		if err := p.refreshTypesFile(); err != nil {
 			color.Yellow("Unable to refresh app types file: %v", err)
@@ -263,8 +265,26 @@ func (p *plugin) registerHooks() error {
 		apisBinds(vm)
 		mailsBinds(vm)
 
+		// Remove all characters that are not alphanumeric or spaces or underscores
+		s := regexp.MustCompile("[^a-zA-Z0-9_ ]+").ReplaceAllString(p.app.Settings().Meta.AppName, "")
+
+		// Replace all underscores with spaces
+		s = strings.ReplaceAll(s, "_", " ")
+
+		// Title case s
+		s = cases.Title(language.AmericanEnglish, cases.NoLower).String(s)
+
+		// Remove all spaces
+		s = strings.ReplaceAll(s, " ", "")
+
+		// Lowercase the first letter
+		if len(s) > 0 {
+			vm.Set(strings.ToUpper(s[:1])+s[1:], p.app)
+		}
+		vm.Set("App", p.app)
 		vm.Set("$app", p.app)
 		vm.Set("$template", templateRegistry)
+		vm.Set("Template", templateRegistry)
 		vm.Set("__hooks", absHooksDir)
 
 		if p.config.OnInit != nil {

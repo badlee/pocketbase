@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -170,6 +171,7 @@ type PocketBase = excludeHooks<ORIGINAL_POCKETBASE>
  * @group PocketBase
  */
 declare var $app: PocketBase
+declare var App: PocketBase
 
 /**
  * ` + "`$template`" + ` is a global helper to load and cache HTML templates on the fly.
@@ -191,6 +193,7 @@ declare var $app: PocketBase
  * @namespace
  * @group PocketBase
  */
+declare var Template: template.Registry
 declare var $template: template.Registry
 
 /**
@@ -550,6 +553,8 @@ declare namespace $dbx {
   export let between:    dbx.between
   export let notBetween: dbx.notBetween
 }
+// Alias
+import DB = $dbx
 
 // -------------------------------------------------------------------
 // tokensBinds
@@ -573,7 +578,8 @@ declare namespace $tokens {
   let recordChangeEmailToken:   tokens.newRecordChangeEmailToken
   let recordFileToken:          tokens.newRecordFileToken
 }
-
+// Alias
+import Tokens = $tokens
 // -------------------------------------------------------------------
 // mailsBinds
 // -------------------------------------------------------------------
@@ -590,7 +596,8 @@ declare namespace $mails {
   let sendRecordVerification:  mails.sendRecordVerification
   let sendRecordChangeEmail:   mails.sendRecordChangeEmail
 }
-
+// Alias
+import Mail = $mails
 // -------------------------------------------------------------------
 // securityBinds
 // -------------------------------------------------------------------
@@ -627,6 +634,9 @@ declare namespace $security {
   export function parseJWT(token: string, verificationKey: string): _TygojaDict
 }
 
+// Alias
+import Security = $security
+
 // -------------------------------------------------------------------
 // filesystemBinds
 // -------------------------------------------------------------------
@@ -659,6 +669,8 @@ declare namespace $filesystem {
   export function fileFromUrl(url: string, secTimeout?: number): filesystem.File
 }
 
+// Alias
+import Filesystem = $filesystem
 // -------------------------------------------------------------------
 // filepathBinds
 // -------------------------------------------------------------------
@@ -686,6 +698,8 @@ declare namespace $filepath {
   export let walk:      filepath.walk
   export let walkDir:   filepath.walkDir
 }
+// Alias
+import Filepath = $filepath
 
 // -------------------------------------------------------------------
 // osBinds
@@ -734,6 +748,10 @@ declare namespace $os {
   export let remove:    os.remove
   export let removeAll: os.removeAll
 }
+
+// Alias
+import System = $os
+import Os = $os
 
 // -------------------------------------------------------------------
 // formsBinds
@@ -1000,6 +1018,9 @@ declare namespace $apis {
   let enrichRecords:             apis.enrichRecords
 }
 
+// Alias
+import Api = $apis
+
 // -------------------------------------------------------------------
 // httpClientBinds
 // -------------------------------------------------------------------
@@ -1052,6 +1073,10 @@ declare namespace $http {
     json:       any,
   };
 }
+
+// Alias
+import Http = $http
+
 
 // -------------------------------------------------------------------
 // migrate only
@@ -1131,11 +1156,12 @@ func main() {
 	}
 
 	// replace the original app interfaces with their non-"on*"" hooks equivalents
+	result = regexp.MustCompile("\nnamespace os \\{").ReplaceAllString(result, "\nnamespace os {\n  /**\n   * Args hold the command-line arguments, starting with the program name.\n   */\n  interface args extends Array<string>{}")
+	result = regexp.MustCompile("\nnamespace").ReplaceAllString(result, "\ndeclare namespace")
 	result = strings.ReplaceAll(result, "core.App", "CoreApp")
 	result = strings.ReplaceAll(result, "pocketbase.PocketBase", "PocketBase")
 	result = strings.ReplaceAll(result, "ORIGINAL_CORE_APP", "core.App")
 	result = strings.ReplaceAll(result, "ORIGINAL_POCKETBASE", "pocketbase.PocketBase")
-
 	// prepend a timestamp with the generation time
 	// so that it can be compared without reading the entire file
 	result = fmt.Sprintf("// %d\n%s", time.Now().Unix(), result)

@@ -20,6 +20,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/daos"
@@ -286,6 +287,7 @@ func wrapMiddlewares(executors *vmsPool, rawMiddlewares ...goja.Value) ([]echo.M
 func baseBinds(vm *goja.Runtime) {
 	vm.SetFieldNameMapper(FieldMapper{})
 
+	vm.Set("VERSION", pocketbase.Version)
 	vm.Set("readerToString", func(r io.Reader, maxBytes int) (string, error) {
 		if maxBytes == 0 {
 			maxBytes = rest.DefaultMaxMemory
@@ -437,6 +439,7 @@ func baseBinds(vm *goja.Runtime) {
 
 func dbxBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("DB", obj)
 	vm.Set("$dbx", obj)
 
 	obj.Set("exp", dbx.NewExp)
@@ -460,6 +463,7 @@ func dbxBinds(vm *goja.Runtime) {
 
 func mailsBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("Mail", obj)
 	vm.Set("$mails", obj)
 
 	// admin
@@ -473,6 +477,7 @@ func mailsBinds(vm *goja.Runtime) {
 
 func tokensBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("Token", obj)
 	vm.Set("$tokens", obj)
 
 	// admin
@@ -490,6 +495,7 @@ func tokensBinds(vm *goja.Runtime) {
 
 func securityBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("Security", obj)
 	vm.Set("$security", obj)
 
 	// crypto
@@ -530,6 +536,7 @@ func securityBinds(vm *goja.Runtime) {
 
 func filesystemBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("Filesystem", obj)
 	vm.Set("$filesystem", obj)
 
 	obj.Set("fileFromPath", filesystem.NewFileFromPath)
@@ -549,6 +556,7 @@ func filesystemBinds(vm *goja.Runtime) {
 
 func filepathBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("Filepath", obj)
 	vm.Set("$filepath", obj)
 
 	obj.Set("base", filepath.Base)
@@ -570,6 +578,8 @@ func filepathBinds(vm *goja.Runtime) {
 
 func osBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("System", obj)
+	vm.Set("Os", obj)
 	vm.Set("$os", obj)
 
 	obj.Set("args", os.Args)
@@ -616,6 +626,7 @@ func formsBinds(vm *goja.Runtime) {
 
 func apisBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("Api", obj)
 	vm.Set("$apis", obj)
 
 	obj.Set("staticDirectoryHandler", func(dir string, indexFallback bool) echo.HandlerFunc {
@@ -649,6 +660,7 @@ func apisBinds(vm *goja.Runtime) {
 
 func httpClientBinds(vm *goja.Runtime) {
 	obj := vm.NewObject()
+	vm.Set("Http", obj)
 	vm.Set("$http", obj)
 
 	vm.Set("FormData", func(call goja.ConstructorCall) *goja.Object {

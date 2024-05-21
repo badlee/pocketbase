@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	typesFileName = "types.d.ts"
+	typesFileName = "types_lua.d.ts"
 )
 
 type plugin struct {
