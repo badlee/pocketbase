@@ -101,6 +101,7 @@ func NewEventLoopWithVM(vm *goja.Runtime, opts ...Option) *EventLoop {
 			if len(call.Arguments) > 1 {
 				args = append(args, call.Arguments[1:]...)
 			}
+			_loop.jobCount++
 			_loop.RunOnLoop(func(r *goja.Runtime) {
 				if _, err := fn(nil, args...); err != nil {
 					panic(err)
