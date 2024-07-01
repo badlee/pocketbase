@@ -12,6 +12,8 @@
 
 - Bumped the min Go version in the GitHub release action to Go 1.22.5 since it comes with [`net/http` security fixes](https://github.com/golang/go/issues?q=milestone%3AGo1.22.5).
 
+- Updated Go dependencies.
+
 
 ## v0.22.14
 
