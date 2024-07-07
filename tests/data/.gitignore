@@ -1,3 +1,5 @@
 *.db-shm
 *.db-wal
 types.d.ts
+wasm.d.ts
+lua.d.ts

@@ -1165,7 +1165,7 @@ func main() {
 	result = fmt.Sprintf("// %d\n%s", time.Now().Unix(), result)
 
 	parentDir := filepath.Dir(filename)
-	typesFile := filepath.Join(parentDir, "generated", "lua.d.ts")
+	typesFile := filepath.Join(parentDir, "generated", "wasm.d.ts")
 
 	if err := os.WriteFile(typesFile, []byte(result), 0644); err != nil {
 		log.Fatal(err)

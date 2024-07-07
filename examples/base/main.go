@@ -14,6 +14,7 @@ import (
 	"github.com/pocketbase/pocketbase/plugins/jsvm"
 	"github.com/pocketbase/pocketbase/plugins/luavm"
 	"github.com/pocketbase/pocketbase/plugins/migratecmd"
+	"github.com/pocketbase/pocketbase/plugins/wasm"
 )
 
 func main() {
@@ -103,6 +104,13 @@ func main() {
 
 	// load jsvm (hooks and migrations)
 	luavm.MustRegister(app, luavm.Config{
+		MigrationsDir: migrationsDir,
+		HooksDir:      hooksDir,
+		HooksWatch:    hooksWatch,
+		HooksPoolSize: hooksPool,
+	})
+
+	wasm.MustRegister(app, wasm.Config{
 		MigrationsDir: migrationsDir,
 		HooksDir:      hooksDir,
 		HooksWatch:    hooksWatch,

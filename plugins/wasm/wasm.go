@@ -3,13 +3,14 @@
 //
 // Example:
 //
-//	luavm.MustRegister(app, jsvm.Config{
+//	quickjs.MustRegister(app, quickjs.Config{
 //		HooksWatch: true,
 //	})
-package luavm
+package wasm
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,21 +19,25 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"time"
+
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	m "github.com/pocketbase/pocketbase/migrations"
 
-	rtlib "github.com/arnodel/golua/lib"
-	rt "github.com/arnodel/golua/runtime"
 	"github.com/fatih/color"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/plugins/luavm/internal/types/generated"
+	"github.com/pocketbase/pocketbase/plugins/wasm/internal/types/generated"
 	"github.com/pocketbase/pocketbase/tools/rest"
+	"github.com/pocketbase/pocketbase/tools/waitgroup"
 )
 
 const (
-	typesFileName = "lua.d.ts"
+	typesFileName = "wasm.d.ts"
 )
 
 type plugin struct {
@@ -45,7 +50,7 @@ type Config struct {
 	// OnInit is an optional function that will be called
 	// after a JS runtime is initialized, allowing you to
 	// attach custom Go variables and functions.
-	OnInit func(vm *rt.Runtime)
+	OnInit func(vm *wazero.Runtime)
 
 	// HooksWatch enables auto app restarts when a JS app hook file changes.
 	//
@@ -61,8 +66,8 @@ type Config struct {
 	// HooksFilesPattern specifies a regular expression pattern that
 	// identify which file to load by the hook vm(s).
 	//
-	// If not set it fallbacks to `^.*(\.lua|\.luac)$`, aka. any
-	// HookdsDir file ending in ".lua" or ".luac" (the last one is to enforce IDE linters).
+	// If not set it fallbacks to `^.*\.wasm$`, aka. any
+	// HookdsDir file ending in ".wasm" (the last one is to enforce IDE linters).
 	HooksFilesPattern string
 
 	// HooksPoolSize specifies how many goja.Runtime instances to prewarm
@@ -77,8 +82,8 @@ type Config struct {
 	// If not set it fallbacks to a relative "pb_data/../pb_migrations" directory.
 	MigrationsDir string
 
-	// If not set it fallbacks to `^.*(\.lua|\.luac)$`, aka. any MigrationDir file
-	// ending in ".lua" or ".luac" (the last one is to enforce IDE linters).
+	// If not set it fallbacks to `^.*\.wasm$`, aka. any MigrationDir file
+	// ending in ".wasm" (the last one is to enforce IDE linters).
 	MigrationsFilesPattern string
 
 	// TypesDir specifies the directory where to store the embedded
@@ -97,9 +102,9 @@ type Config struct {
 // Example usage:
 //
 //	jsvm.MustRegister(app, jsvm.Config{
-//		OnInit: func(vm *luavm.Runtime) {
+//		OnInit: func(vm *wazero.Runtime) {
 //			// register custom bindings
-//			vmSet(vm,"myCustomVar", 123)
+//			vmSet(&module,"myCustomVar", 123)
 //		}
 //	})
 func MustRegister(app core.App, config Config) {
@@ -121,11 +126,11 @@ func Register(app core.App, config Config) error {
 	}
 
 	if p.config.HooksFilesPattern == "" {
-		p.config.HooksFilesPattern = `^.*(\.lua|\.luac)$`
+		p.config.HooksFilesPattern = `^.*\.wasm$`
 	}
 
 	if p.config.MigrationsFilesPattern == "" {
-		p.config.MigrationsFilesPattern = `^.*(\.lua|\.luac)$`
+		p.config.MigrationsFilesPattern = `^.*\.wasm$`
 	}
 
 	if p.config.TypesDir == "" {
@@ -144,10 +149,10 @@ func Register(app core.App, config Config) error {
 	if err != nil {
 		return (fmt.Errorf("registerMigrations: %w", err))
 	}
-	// err = p.registerHooks()
-	// if err != nil {
-	// 	return (fmt.Errorf("registerHooks: %w", err))
-	// }
+	err = p.registerHooks()
+	if err != nil {
+		return (fmt.Errorf("registerHooks: %w", err))
+	}
 	return nil
 }
 
@@ -199,8 +204,10 @@ func (p *plugin) registerMigrations() error {
 	go func() {
 		// vm := goja.New()
 		for file, content := range files {
-			vm := p.newVM()
-			baseBinds(vm)
+			vm, ctx, vmConfig := p.newVM()
+			defer (*vm).Close(ctx)
+
+			envBinds(vm, &ctx, &file)
 			// dbxBinds(vm)
 			// tokensBinds(vm)
 			// securityBinds(vm)
@@ -210,38 +217,94 @@ func (p *plugin) registerMigrations() error {
 			if p.config.OnInit != nil {
 				p.config.OnInit(vm)
 			}
-			vmSet(vm, "migrate", func(up, down func(db dbx.Builder) error) {
-				m.AppMigrations.Register(up, down, file)
-			})
-			_, err := vm.CompileAndLoadLuaChunk(file, content, rt.TableValue(vm.GlobalEnv()))
+
+			// Create a new context
+			_, err := (*vm).InstantiateWithConfig(ctx, content, *vmConfig)
 			if err != nil {
 				_err <- fmt.Errorf("failed to run migration %s: %w", file, err)
 				return
 			}
 		}
 		_err <- nil
-		// defer loop.Stop()
 	}()
 
 	return <-_err
 }
 
-func (p *plugin) newVM() *rt.Runtime {
-	// First we obtain a new Lua runtime which outputs to stdout
-	r := rt.New(os.Stdout)
+// registerHooks registers the JS migrations loader.
+func (p *plugin) registerHooks() error {
+	// fetch all js migrations sorted by their filename
+	files, err := filesContent(p.config.HooksDir, p.config.HooksFilesPattern)
+	if err != nil {
+		return err
+	}
+	var _err = make(chan error)
+	go func() {
+		waiter := waitgroup.Create()
+		// vm := goja.New()
+		for file, content := range files {
+			waiter.Inc()
+			go func(file string, content []byte) {
+				vm, ctx, vmConfig := p.newVM()
+				defer (*vm).Close(ctx)
 
-	// Load the basic library into the runtime (we need print)
-	rtlib.LoadAll(r)
-	return r
+				envBinds(vm, &ctx, nil)
+				// dbxBinds(vm)
+				// tokensBinds(vm)
+				// securityBinds(vm)
+				// osBinds(vm)
+				// filepathBinds(vm)
+				// httpClientBinds(vm)
+				if p.config.OnInit != nil {
+					p.config.OnInit(vm)
+				}
+				// Create a new context
+				_, err := (*vm).InstantiateWithConfig(ctx, content, *vmConfig)
+				waiter.Dec()
+				if err != nil {
+					_err <- fmt.Errorf("failed to run hook %s: %w", file, err)
+				}
+			}(file, content)
+		}
+		waiter.Wait()
+		_err <- nil
+	}()
+	e := <-_err
+
+	return e
+}
+
+func (p *plugin) newVM() (*wazero.Runtime, context.Context, *wazero.ModuleConfig) {
+	// First we obtain a new Lua runtime which outputs to stdout
+	// Choose the context to use for function calls.
+	ctx := context.Background()
+	// Create a new WebAssembly Runtime.
+	r := wazero.NewRuntime(ctx)
+	// Combine the above into our baseline config, overriding defaults.
+	config := wazero.NewModuleConfig().
+		// By default, I/O streams are discarded and there's no file system.
+		WithStdout(os.Stdout).
+		WithStderr(os.Stderr).
+		WithFS(os.DirFS(p.config.HooksDir)).
+		WithArgs(os.Args...)
+
+	for _, v := range os.Environ() {
+		k := strings.Split(v, "=")
+		config.WithEnv(k[0], strings.Join(k[1:], "="))
+	}
+	// Instantiate WASI, which implements system I/O such as console output.
+	wasi_snapshot_preview1.MustInstantiate(ctx, r)
+	return &r, ctx, &config
 }
 
 //////////////////// UTILITIES
 
-func vmSet(vm *rt.Runtime, name string, v interface{}) {
+func vmSet(module *wazero.HostModuleBuilder, name string, v interface{}) {
 	vType := reflect.TypeOf(v)
 	if vType.Kind() == reflect.Func {
+		totalArgs := vType.NumIn()
 		fmt.Println("Args:")
-		for i := 0; i < vType.NumIn(); i++ {
+		for i := 0; i < totalArgs; i++ {
 			ti := vType.In(i) // get type of i'th argument
 			fmt.Println("\t", ti)
 		}
@@ -250,11 +313,26 @@ func vmSet(vm *rt.Runtime, name string, v interface{}) {
 			ti := vType.Out(i) // get type of i'th result
 			fmt.Println("\t", ti)
 		}
+		(*module).
+			NewFunctionBuilder().
+			WithFunc(func(_ context.Context, m api.Module, offset, byteCount uint32) {
+				buf, ok := m.Memory().Read(offset, byteCount)
+				if ok {
+					// in := make([]reflect.Value, totalArgs)
+					fmt.Println(string(buf))
+				}
+			}).Export(name)
 	}
 }
-func baseBinds(vm *rt.Runtime) {
-
-	vmSet(vm, "readerToString", func(r io.Reader, maxBytes int) (string, error) {
+func envBinds(vm *wazero.Runtime, ctx *context.Context, file *string) {
+	module := (*vm).NewHostModuleBuilder("env")
+	if file != nil {
+		vmSet(&module, "migrate", func(up, down func(db dbx.Builder) error) {
+			m.AppMigrations.Register(up, down, *file)
+		})
+	}
+	vmSet(&module, "log", fmt.Sprintf)
+	vmSet(&module, "readerToString", func(r io.Reader, maxBytes int) (string, error) {
 		if maxBytes == 0 {
 			maxBytes = rest.DefaultMaxMemory
 		}
@@ -269,11 +347,11 @@ func baseBinds(vm *rt.Runtime) {
 		return string(bodyBytes), nil
 	})
 
-	vmSet(vm, "sleep", func(milliseconds int64) {
+	vmSet(&module, "sleep", func(milliseconds int64) {
 		time.Sleep(time.Duration(milliseconds) * time.Millisecond)
 	})
 
-	vmSet(vm, "arrayOf", func(model any) any {
+	vmSet(&module, "arrayOf", func(model any) any {
 		mt := reflect.TypeOf(model)
 		st := reflect.SliceOf(mt)
 		elem := reflect.New(st).Elem()
@@ -281,7 +359,7 @@ func baseBinds(vm *rt.Runtime) {
 		return elem.Addr().Interface()
 	})
 
-	// vmSet(vm, "DynamicModel", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "DynamicModel", func(call goja.ConstructorCall) *goja.Object {
 	// 	shape, ok := call.Argument(0).Export().(map[string]any)
 	// 	if !ok || len(shape) == 0 {
 	// 		panic("[DynamicModel] missing shape data")
@@ -294,7 +372,7 @@ func baseBinds(vm *rt.Runtime) {
 	// 	return instanceValue
 	// })
 
-	// vmSet(vm, "Record", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "Record", func(call goja.ConstructorCall) *goja.Object {
 	// 	var instance *models.Record
 
 	// 	collection, ok := call.Argument(0).Export().(*models.Collection)
@@ -314,42 +392,42 @@ func baseBinds(vm *rt.Runtime) {
 	// 	return instanceValue
 	// })
 
-	// vmSet(vm, "Collection", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "Collection", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &models.Collection{}
 	// 	return structConstructorUnmarshal(vm, call, instance)
 	// })
 
-	// vmSet(vm, "Admin", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "Admin", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &models.Admin{}
 	// 	return structConstructorUnmarshal(vm, call, instance)
 	// })
 
-	// vmSet(vm, "Schema", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "Schema", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &schema.Schema{}
 	// 	return structConstructorUnmarshal(vm, call, instance)
 	// })
 
-	// vmSet(vm, "SchemaField", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "SchemaField", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &schema.SchemaField{}
 	// 	return structConstructorUnmarshal(vm, call, instance)
 	// })
 
-	// vmSet(vm, "MailerMessage", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "MailerMessage", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &mailer.Message{}
 	// 	return structConstructor(vm, call, instance)
 	// })
 
-	// vmSet(vm, "Command", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "Command", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &cobra.Command{}
 	// 	return structConstructor(vm, call, instance)
 	// })
 
-	// vmSet(vm, "RequestInfo", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "RequestInfo", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &models.RequestInfo{Context: models.RequestInfoContextDefault}
 	// 	return structConstructor(vm, call, instance)
 	// })
 
-	// vmSet(vm, "DateTime", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "DateTime", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := types.NowDateTime()
 
 	// 	val, _ := call.Argument(0).Export().(string)
@@ -363,7 +441,7 @@ func baseBinds(vm *rt.Runtime) {
 	// 	return structConstructor(vm, call, instance)
 	// })
 
-	// vmSet(vm, "ValidationError", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "ValidationError", func(call goja.ConstructorCall) *goja.Object {
 	// 	code, _ := call.Argument(0).Export().(string)
 	// 	message, _ := call.Argument(1).Export().(string)
 
@@ -374,7 +452,7 @@ func baseBinds(vm *rt.Runtime) {
 	// 	return instanceValue
 	// })
 
-	// vmSet(vm, "Dao", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "Dao", func(call goja.ConstructorCall) *goja.Object {
 	// 	concurrentDB, _ := call.Argument(0).Export().(dbx.Builder)
 	// 	if concurrentDB == nil {
 	// 		panic("[Dao] missing required Dao(concurrentDB, [nonconcurrentDB]) argument")
@@ -392,15 +470,16 @@ func baseBinds(vm *rt.Runtime) {
 	// 	return instanceValue
 	// })
 
-	// vmSet(vm, "Cookie", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "Cookie", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &http.Cookie{}
 	// 	return structConstructor(vm, call, instance)
 	// })
 
-	// vmSet(vm, "SubscriptionMessage", func(call goja.ConstructorCall) *goja.Object {
+	// vmSet(&module, "SubscriptionMessage", func(call goja.ConstructorCall) *goja.Object {
 	// 	instance := &subscriptions.Message{}
 	// 	return structConstructor(vm, call, instance)
 	// })
+	module.Instantiate((*ctx))
 }
 
 // filesContent returns a map with all direct files within the specified dir and their content.

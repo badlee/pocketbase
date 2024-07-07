@@ -264,6 +264,7 @@ func (p *plugin) registerHooks() error {
 		formsBinds(vm)
 		apisBinds(vm)
 		mailsBinds(vm)
+		socketIOSharedBinds(vm)
 
 		// Remove all characters that are not alphanumeric or spaces or underscores
 		s := regexp.MustCompile("[^a-zA-Z0-9_ ]+").ReplaceAllString(p.app.Settings().Meta.AppName, "")
@@ -341,6 +342,7 @@ func (p *plugin) registerHooks() error {
 				hooksBinds(p.app, vm, executors)
 				cronBinds(p.app, vm, executors)
 				routerBinds(p.app, vm, executors)
+				socketIOBinds(p.app, vm, executors)
 				_, err := vm.RunString(string(content))
 				if err != nil {
 					_err <- err

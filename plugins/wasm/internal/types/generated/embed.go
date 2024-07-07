@@ -2,5 +2,5 @@ package generated
 
 import "embed"
 
-//go:embed lua.d.ts
+//go:embed wasm.d.ts
 var Types embed.FS
