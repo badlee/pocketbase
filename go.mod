@@ -6,12 +6,12 @@ toolchain go1.22.3
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
-	github.com/aws/aws-sdk-go-v2 v1.28.0
-	github.com/aws/aws-sdk-go-v2/config v1.27.19
-	github.com/aws/aws-sdk-go-v2/credentials v1.17.19
-	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.16.25
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.55.2
-	github.com/aws/smithy-go v1.20.2
+	github.com/aws/aws-sdk-go-v2 v1.30.1
+	github.com/aws/aws-sdk-go-v2/config v1.27.24
+	github.com/aws/aws-sdk-go-v2/credentials v1.17.24
+	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.5
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.58.0
+	github.com/aws/smithy-go v1.20.3
 	github.com/disintegration/imaging v1.6.2
 	github.com/domodwyer/mailyak/v3 v3.6.2
 	github.com/dop251/goja v0.0.0-20240627195025-eb1f15ee67d2
@@ -54,7 +54,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.15 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.17.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.22.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.1 // indirect
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be // indirect
 	github.com/creachadair/otp v0.4.2 // indirect
