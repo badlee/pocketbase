@@ -27,6 +27,8 @@ import (
 	"github.com/pocketbase/pocketbase/tools/subscriptions"
 	"github.com/pocketbase/pocketbase/tools/types"
 	"github.com/spf13/cast"
+	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
 )
 
 const (
@@ -48,6 +50,8 @@ type BaseApp struct {
 
 	// configurable parameters
 	isDev            bool
+	DefaultAppName   *string
+	config           *BaseAppConfig
 	dataDir          string
 	encryptionEnv    string
 	dataMaxOpenConns int
@@ -58,6 +62,7 @@ type BaseApp struct {
 	// internals
 	store               *store.Store[any]
 	settings            *settings.Settings
+	flags               *flag.FlagSet
 	dao                 *daos.Dao
 	logsDao             *daos.Dao
 	subscriptionsBroker *subscriptions.Broker
@@ -176,12 +181,18 @@ type BaseApp struct {
 // BaseAppConfig defines a BaseApp configuration option
 type BaseAppConfig struct {
 	IsDev            bool
+	DefaultAppName   string
 	DataDir          string
 	EncryptionEnv    string
 	DataMaxOpenConns int // default to 500
 	DataMaxIdleConns int // default 20
 	LogsMaxOpenConns int // default to 100
 	LogsMaxIdleConns int // default to 5
+
+	// optional Command CLI parser
+	Flags *flag.FlagSet
+	//
+	RootCmd *cobra.Command
 }
 
 // NewBaseApp creates and returns a new BaseApp instance
@@ -189,7 +200,14 @@ type BaseAppConfig struct {
 //
 // To initialize the app, you need to call `app.Bootstrap()`.
 func NewBaseApp(config BaseAppConfig) *BaseApp {
+	if config.Flags == nil {
+		config.Flags = &flag.FlagSet{}
+	}
+
 	app := &BaseApp{
+		DefaultAppName:      &config.DefaultAppName,
+		flags:               config.Flags,
+		config:              &config,
 		isDev:               config.IsDev,
 		dataDir:             config.DataDir,
 		encryptionEnv:       config.EncryptionEnv,
@@ -198,7 +216,7 @@ func NewBaseApp(config BaseAppConfig) *BaseApp {
 		logsMaxOpenConns:    config.LogsMaxOpenConns,
 		logsMaxIdleConns:    config.LogsMaxIdleConns,
 		store:               store.New[any](nil),
-		settings:            settings.New(),
+		settings:            settings.New(&config.DefaultAppName),
 		subscriptionsBroker: subscriptions.NewBroker(),
 
 		// app event hooks
@@ -473,6 +491,16 @@ func (app *BaseApp) Settings() *settings.Settings {
 	return app.settings
 }
 
+// UserDefinedFlags returns the user defined flags.
+func (app *BaseApp) UserDefinedFlags() *flag.FlagSet {
+	return app.flags
+}
+
+// UserDefinedFlags returns the user defined flags.
+func (app *BaseApp) Config() *BaseAppConfig {
+	return app.config
+}
+
 // Deprecated: Use app.Store() instead.
 func (app *BaseApp) Cache() *store.Store[any] {
 	color.Yellow("app.Store() is soft-deprecated. Please replace it with app.Store().")
@@ -579,7 +607,7 @@ func (app *BaseApp) Restart() error {
 // RefreshSettings reinitializes and reloads the stored application settings.
 func (app *BaseApp) RefreshSettings() error {
 	if app.settings == nil {
-		app.settings = settings.New()
+		app.settings = settings.New(app.DefaultAppName)
 	}
 
 	encryptionKey := os.Getenv(app.EncryptionEnv())

@@ -45,6 +45,9 @@ type ServeConfig struct {
 
 	// AllowedOrigins is an optional list of CORS origins (default to "*").
 	AllowedOrigins []string
+
+	// Sets the path value under which socket.io and the static files will be served. Defaults to /socket.io/
+	SocketIOPath string
 }
 
 // Serve starts a new app web server.
@@ -170,7 +173,6 @@ func Serve(app core.App, config ServeConfig) (*http.Server, error) {
 	if err := app.OnBeforeServe().Trigger(serveEvent); err != nil {
 		return nil, err
 	}
-
 	if config.ShowStartBanner {
 		schema := "http"
 		addr := server.Addr
@@ -187,6 +189,7 @@ func Serve(app core.App, config ServeConfig) (*http.Server, error) {
 		log.New(date, "", log.LstdFlags).Print()
 
 		bold := color.New(color.Bold).Add(color.FgGreen)
+
 		bold.Printf(
 			"%s Server started at %s\n",
 			strings.TrimSpace(date.String()),

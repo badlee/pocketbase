@@ -95,7 +95,7 @@ func init() {
 
 		// inserts default settings
 		// -----------------------------------------------------------
-		defaultSettings := settings.New()
+		defaultSettings := settings.New(nil)
 		if err := dao.SaveSettings(defaultSettings); err != nil {
 			return err
 		}

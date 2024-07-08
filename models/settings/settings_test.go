@@ -15,7 +15,7 @@ import (
 )
 
 func TestSettingsValidate(t *testing.T) {
-	s := settings.New()
+	s := settings.New(nil)
 
 	// set invalid settings data
 	s.Meta.AppName = ""
@@ -139,10 +139,10 @@ func TestSettingsValidate(t *testing.T) {
 }
 
 func TestSettingsMerge(t *testing.T) {
-	s1 := settings.New()
+	s1 := settings.New(nil)
 	s1.Meta.AppUrl = "old_app_url"
 
-	s2 := settings.New()
+	s2 := settings.New(nil)
 	s2.Meta.AppName = "test"
 	s2.Logs.MaxDays = 123
 	s2.Smtp.Host = "test"
@@ -229,7 +229,7 @@ func TestSettingsMerge(t *testing.T) {
 }
 
 func TestSettingsClone(t *testing.T) {
-	s1 := settings.New()
+	s1 := settings.New(nil)
 
 	s2, err := s1.Clone()
 	if err != nil {
@@ -260,7 +260,7 @@ func TestSettingsClone(t *testing.T) {
 func TestSettingsRedactClone(t *testing.T) {
 	testSecret := "test_secret"
 
-	s1 := settings.New()
+	s1 := settings.New(nil)
 
 	// control fields
 	s1.Meta.AppName = "test123"
@@ -336,7 +336,7 @@ func TestSettingsRedactClone(t *testing.T) {
 }
 
 func TestNamedAuthProviderConfigs(t *testing.T) {
-	s := settings.New()
+	s := settings.New(nil)
 
 	s.GoogleAuth.ClientId = "google_test"
 	s.FacebookAuth.ClientId = "facebook_test"

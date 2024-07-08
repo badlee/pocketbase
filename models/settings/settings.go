@@ -70,10 +70,14 @@ type Settings struct {
 }
 
 // New creates and returns a new default Settings instance.
-func New() *Settings {
+func New(DefaultAppName *string) *Settings {
+	defaultAppName := "Acme"
+	if DefaultAppName != nil {
+		defaultAppName = *DefaultAppName
+	}
 	return &Settings{
 		Meta: MetaConfig{
-			AppName:                    "Acme",
+			AppName:                    defaultAppName,
 			AppUrl:                     "http://localhost:8090",
 			HideControls:               false,
 			SenderName:                 "Support",

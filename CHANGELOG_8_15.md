@@ -690,7 +690,7 @@
 - Moved `core.Settings` to `models/settings.Settings`:
   ```
   core.Settings{}           -> settings.Settings{}
-  core.NewSettings()        -> settings.New()
+  core.NewSettings()        -> settings.New(nil)
   core.MetaConfig{}         -> settings.MetaConfig{}
   core.LogsConfig{}         -> settings.LogsConfig{}
   core.SmtpConfig{}         -> settings.SmtpConfig{}

@@ -115,6 +115,7 @@ func InitApi(app core.App) (*echo.Echo, error) {
 
 	// admin ui routes
 	bindStaticAdminUI(app, e)
+	bindSocketIO(app, e)
 
 	// default routes
 	api := e.Group("/api", eagerRequestInfoCache(app))

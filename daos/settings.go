@@ -22,7 +22,7 @@ func (dao *Dao) FindSettings(optEncryptionKey ...string) (*settings.Settings, er
 		return nil, err
 	}
 
-	result := settings.New()
+	result := settings.New(nil)
 
 	// try first without decryption
 	plainDecodeErr := json.Unmarshal(param.Value, result)

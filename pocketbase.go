@@ -1,6 +1,7 @@
 package pocketbase
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/list"
 	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
 )
 
 var _ core.App = (*PocketBase)(nil)
@@ -43,7 +45,11 @@ type PocketBase struct {
 
 // Config is the PocketBase initialization config struct.
 type Config struct {
+	// optional Command CLI parser
+	Flags *flag.FlagSet
+
 	// optional default values for the console flags
+	DefaultAppName       string
 	DefaultDev           bool
 	DefaultDataDir       string // if not set, it will fallback to "./pb_data"
 	DefaultEncryptionEnv string
@@ -87,11 +93,14 @@ func NewWithConfig(config Config) *PocketBase {
 		baseDir, _ := inspectRuntime()
 		config.DefaultDataDir = filepath.Join(baseDir, "pb_data")
 	}
+	if config.DefaultAppName == "" {
+		config.DefaultAppName = "Acme"
+	}
 
 	pb := &PocketBase{
 		RootCmd: &cobra.Command{
 			Use:     filepath.Base(os.Args[0]),
-			Short:   "PocketBase CLI",
+			Short:   fmt.Sprintf("%s CLI", config.DefaultAppName),
 			Version: Version,
 			FParseErrWhitelist: cobra.FParseErrWhitelist{
 				UnknownFlags: true,
@@ -118,6 +127,9 @@ func NewWithConfig(config Config) *PocketBase {
 	pb.appWrapper = &appWrapper{core.NewBaseApp(core.BaseAppConfig{
 		IsDev:            pb.devFlag,
 		DataDir:          pb.dataDirFlag,
+		Flags:            config.Flags,
+		RootCmd:          pb.RootCmd,
+		DefaultAppName:   config.DefaultAppName,
 		EncryptionEnv:    pb.encryptionEnvFlag,
 		DataMaxOpenConns: config.DataMaxOpenConns,
 		DataMaxIdleConns: config.DataMaxIdleConns,
@@ -185,25 +197,91 @@ func (pb *PocketBase) Execute() error {
 // eagerParseFlags parses the global app flags before calling pb.RootCmd.Execute().
 // so we can have all PocketBase flags ready for use on initialization.
 func (pb *PocketBase) eagerParseFlags(config *Config) error {
+	defName := "dir"
+	defBoolValue := false
+	defValue := config.DefaultDataDir
+	defUsage := "the PocketBase data directory"
+	if flag := config.Flags.ShorthandLookup("d"); flag != nil {
+		if flag.DefValue != "" {
+			defValue = flag.DefValue
+		}
+		if flag.Usage != "" {
+			defUsage = flag.Usage
+		}
+		if flag.Name != "" {
+			defName = flag.Name
+		}
+	} else if flag := config.Flags.Lookup(defName); flag != nil {
+		if flag.DefValue != "" {
+			defValue = flag.DefValue
+		}
+		if flag.Usage != "" {
+			defUsage = flag.Usage
+		}
+	}
+
 	pb.RootCmd.PersistentFlags().StringVar(
 		&pb.dataDirFlag,
-		"dir",
-		config.DefaultDataDir,
-		"the PocketBase data directory",
+		defName,
+		defValue,
+		defUsage,
 	)
+
+	defName = "encryption-env"
+	defValue = config.DefaultEncryptionEnv
+	defUsage = "the env variable whose value of 32 characters will be used \nas encryption key for the app settings (default none)"
+	if flag := config.Flags.ShorthandLookup("e"); flag != nil {
+		if flag.DefValue != "" {
+			defValue = flag.DefValue
+		}
+		if flag.Usage != "" {
+			defUsage = flag.Usage
+		}
+		if flag.Name != "" {
+			defName = flag.Name
+		}
+	} else if flag := config.Flags.Lookup(defName); flag != nil {
+		if flag.DefValue != "" {
+			defValue = flag.DefValue
+		}
+		if flag.Usage != "" {
+			defUsage = flag.Usage
+		}
+	}
 
 	pb.RootCmd.PersistentFlags().StringVar(
 		&pb.encryptionEnvFlag,
-		"encryptionEnv",
-		config.DefaultEncryptionEnv,
-		"the env variable whose value of 32 characters will be used \nas encryption key for the app settings (default none)",
+		defName,
+		defValue,
+		defUsage,
 	)
+	defName = "dev"
+	defBoolValue = config.DefaultDev
+	defUsage = "enable dev mode, aka. printing logs and sql statements to the console"
+	if flag := config.Flags.ShorthandLookup("D"); flag != nil {
+		if flag.DefValue != "" {
+			defBoolValue = flag.DefValue == "true"
+		}
+		if flag.Usage != "" {
+			defUsage = flag.Usage
+		}
+		if flag.Name != "" {
+			defName = flag.Name
+		}
+	} else if flag := config.Flags.Lookup(defName); flag != nil {
+		if flag.DefValue != "" {
+			defBoolValue = flag.DefValue == "true"
+		}
+		if flag.Usage != "" {
+			defUsage = flag.Usage
+		}
+	}
 
 	pb.RootCmd.PersistentFlags().BoolVar(
 		&pb.devFlag,
-		"dev",
-		config.DefaultDev,
-		"enable dev mode, aka. printing logs and sql statements to the console",
+		defName,
+		defBoolValue,
+		defUsage,
 	)
 
 	return pb.RootCmd.ParseFlags(os.Args[1:])

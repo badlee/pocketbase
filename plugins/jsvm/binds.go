@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,7 +17,12 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/fatih/color"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
+	tableList "github.com/jedib0t/go-pretty/v6/list"
+	"github.com/jedib0t/go-pretty/v6/progress"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/pocketbase/dbx"
@@ -162,6 +168,371 @@ func cronBinds(app core.App, loader *goja.Runtime, executors *vmsPool) {
 	})
 }
 
+func cliUtilsBinds(vm *goja.Runtime) {
+	cliUtils := vm.NewObject()
+	cliColorsOutput := !color.NoColor
+	cliShowTag := true
+	setColor := func(tag string, colorizeTag func(format string, a ...interface{}) string, colorize func(format string, a ...interface{}) string, msg string) string {
+		if strings.HasPrefix(strings.ToUpper(tag), "PRINT") {
+			return msg
+		}
+		if cliShowTag {
+			if cliColorsOutput {
+				return fmt.Sprintf(colorizeTag("[%s] %s"), strings.ToUpper(tag), colorize(msg))
+			} else {
+				return fmt.Sprintf("[%s] %s", strings.ToUpper(tag), msg)
+			}
+		} else {
+			if cliColorsOutput {
+				return colorize(msg)
+			} else {
+				return msg
+			}
+		}
+	}
+	vm.GlobalObject().DefineDataProperty("nil", goja.Null(), goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	vm.Set("Cli", cliUtils)
+	set := func(obj *goja.Object, name string, getInstance func() any, done func(obj *goja.Object)) {
+		obj.Set(name, func(call goja.ConstructorCall) *goja.Object {
+			return structConstructorUnmarshal(vm, call, getInstance())
+		})
+		done(obj.Get(name).ToObject(vm))
+	}
+	cliUtils.Set("enableColor", func() {
+		cliColorsOutput = true
+	})
+	cliUtils.Set("disableColor", func() {
+		cliColorsOutput = false
+	})
+	cliUtils.Set("toggleColor", func() {
+		cliColorsOutput = !cliColorsOutput
+	})
+	cliUtils.DefineAccessorProperty("hasColor", vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return vm.ToValue(cliColorsOutput)
+	}), vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return goja.Null()
+	}), goja.FLAG_FALSE, goja.FLAG_FALSE)
+
+	cliUtils.Set("showTags", func() {
+		cliShowTag = true
+	})
+	cliUtils.Set("hideTags", func() {
+		cliShowTag = false
+	})
+	cliUtils.DefineAccessorProperty("TagsIsVisibleOnLog", vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return vm.ToValue(cliShowTag)
+	}), vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return goja.Null()
+	}), goja.FLAG_FALSE, goja.FLAG_FALSE)
+
+	cliUtils.Set("printf", func(message string, args ...any) *goja.Object {
+		if _, err := os.Stdout.WriteString(setColor("printf", color.HiYellowString, color.YellowString, fmt.Sprintf(message, args...))); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+	cliUtils.Set("print", func(args ...any) *goja.Object {
+		if _, err := os.Stdout.WriteString(setColor("print", color.HiYellowString, color.YellowString, fmt.Sprint(args...))); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+
+	cliUtils.Set("debug", func(args ...any) *goja.Object {
+		if _, err := os.Stdout.WriteString(setColor("debug", color.HiMagentaString, color.MagentaString, fmt.Sprint(args...))); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+
+	cliUtils.Set("log", func(args ...any) *goja.Object {
+		if _, err := os.Stdout.WriteString(setColor("log", color.HiCyanString, color.CyanString, fmt.Sprint(args...))); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+	cliUtils.Set("warn", func(message string, args ...any) *goja.Object {
+		if _, err := os.Stderr.WriteString(setColor("warn", color.HiYellowString, color.YellowString, fmt.Errorf(message, args...).Error())); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+	cliUtils.Set("success", func(message string, args ...any) *goja.Object {
+		if _, err := os.Stdout.WriteString(setColor("success", color.HiGreenString, color.GreenString, fmt.Errorf(message, args...).Error())); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+
+	cliUtils.Set("info", func(message string, args ...any) *goja.Object {
+		if _, err := os.Stdout.WriteString(setColor("info", color.HiBlueString, color.BlueString, fmt.Errorf(message, args...).Error())); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+	cliUtils.Set("error", func(message string, args ...any) *goja.Object {
+		if _, err := os.Stderr.WriteString(setColor("error", color.HiRedString, color.RedString, fmt.Errorf(message, args...).Error())); err != nil {
+			return goja.New().NewGoError(err)
+		}
+		return nil
+	})
+
+	cliUtils.Set("fatal", func(message string, args ...any) {
+		panic(setColor("fatal", color.HiRedString, color.RedString, fmt.Errorf(message, args...).Error()))
+	})
+	obj := vm.Get("String").ToObject(vm).Get("prototype").ToObject(vm)
+	getter := func(fn func(format string, a ...interface{}) string) goja.Value {
+		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			return vm.ToValue(fn(call.This.ToString().String()))
+		})
+	}
+
+	setter := vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return goja.Null()
+	})
+	obj.DefineAccessorProperty("black", getter(color.BlackString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("blue", getter(color.BlueString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("cyan", getter(color.CyanString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("green", getter(color.GreenString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiBlack", getter(color.HiBlackString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiBlue", getter(color.HiBlueString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiCyan", getter(color.HiCyanString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiGreen", getter(color.HiGreenString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiMagenta", getter(color.HiMagentaString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiRed", getter(color.HiRedString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiWhite", getter(color.HiWhiteString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("hiYellow", getter(color.HiYellowString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("magenta", getter(color.MagentaString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("red", getter(color.RedString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("white", getter(color.WhiteString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	obj.DefineAccessorProperty("yellow", getter(color.YellowString), setter, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	set(cliUtils, "Table", func() any { return table.NewWriter() }, func(obj *goja.Object) {
+
+		set(obj, "BoxStyle", func() any { return &table.BoxStyle{} }, func(obj *goja.Object) {})
+		obj.Set("Row", func(value ...interface{}) table.Row {
+			return value
+		})
+		set(obj, "ColorOptions", func() any { return &table.ColorOptions{} }, func(obj *goja.Object) {})
+		set(obj, "ColumnConfig", func() any { return &table.ColumnConfig{} }, func(obj *goja.Object) {})
+		set(obj, "RowConfig", func() any { return &table.RowConfig{} }, func(obj *goja.Object) {})
+		set(obj, "FormatOptions", func() any { return &table.FormatOptions{} }, func(obj *goja.Object) {})
+		set(obj, "Options", func() any { return &table.Options{} }, func(obj *goja.Object) {})
+		set(obj, "SortBy", func() any { return &table.SortBy{} }, func(obj *goja.Object) {})
+		set(obj, "Style", func() any { return &table.Style{} }, func(obj *goja.Object) {})
+		obj.Set("DefaultHTMLCSSClass", table.DefaultHTMLCSSClass)
+		obj.Set("StyleDefault", table.StyleDefault)
+		obj.Set("StyleBold", table.StyleBold)
+		obj.Set("StyleColoredBright", table.StyleColoredBright)
+		obj.Set("StyleColoredDark", table.StyleColoredDark)
+		obj.Set("StyleColoredBlackOnBlueWhite", table.StyleColoredBlackOnBlueWhite)
+		obj.Set("StyleColoredBlackOnCyanWhite", table.StyleColoredBlackOnCyanWhite)
+		obj.Set("StyleColoredBlackOnGreenWhite", table.StyleColoredBlackOnGreenWhite)
+		obj.Set("StyleColoredBlackOnMagentaWhite", table.StyleColoredBlackOnMagentaWhite)
+		obj.Set("StyleColoredBlackOnYellowWhite", table.StyleColoredBlackOnYellowWhite)
+		obj.Set("StyleColoredBlackOnRedWhite", table.StyleColoredBlackOnRedWhite)
+		obj.Set("StyleColoredBlueWhiteOnBlack", table.StyleColoredBlueWhiteOnBlack)
+		obj.Set("StyleColoredCyanWhiteOnBlack", table.StyleColoredCyanWhiteOnBlack)
+		obj.Set("StyleColoredGreenWhiteOnBlack", table.StyleColoredGreenWhiteOnBlack)
+		obj.Set("StyleColoredMagentaWhiteOnBlack", table.StyleColoredMagentaWhiteOnBlack)
+		obj.Set("StyleColoredRedWhiteOnBlack", table.StyleColoredRedWhiteOnBlack)
+		obj.Set("StyleColoredYellowWhiteOnBlack", table.StyleColoredYellowWhiteOnBlack)
+		obj.Set("StyleDouble", table.StyleDouble)
+		obj.Set("StyleLight", table.StyleLight)
+		obj.Set("StyleRounded", table.StyleRounded)
+		obj.Set("StyleBoxDefault", table.StyleBoxDefault)
+		obj.Set("StyleBoxBold", table.StyleBoxBold)
+		obj.Set("StyleBoxDouble", table.StyleBoxDouble)
+		obj.Set("StyleBoxLight", table.StyleBoxLight)
+		obj.Set("StyleBoxRounded", table.StyleBoxRounded)
+		obj.Set("ColorOptionsDefault", table.ColorOptionsDefault)
+		obj.Set("ColorOptionsBright", table.ColorOptionsBright)
+		obj.Set("ColorOptionsDark", table.ColorOptionsDark)
+		obj.Set("ColorOptionsBlackOnBlueWhite", table.ColorOptionsBlackOnBlueWhite)
+		obj.Set("ColorOptionsBlackOnCyanWhite", table.ColorOptionsBlackOnCyanWhite)
+		obj.Set("ColorOptionsBlackOnGreenWhite", table.ColorOptionsBlackOnGreenWhite)
+		obj.Set("ColorOptionsBlackOnMagentaWhite", table.ColorOptionsBlackOnMagentaWhite)
+		obj.Set("ColorOptionsBlackOnRedWhite", table.ColorOptionsBlackOnRedWhite)
+		obj.Set("ColorOptionsBlackOnYellowWhite", table.ColorOptionsBlackOnYellowWhite)
+		obj.Set("ColorOptionsBlueWhiteOnBlack", table.ColorOptionsBlueWhiteOnBlack)
+		obj.Set("ColorOptionsCyanWhiteOnBlack", table.ColorOptionsCyanWhiteOnBlack)
+		obj.Set("ColorOptionsGreenWhiteOnBlack", table.ColorOptionsGreenWhiteOnBlack)
+		obj.Set("ColorOptionsMagentaWhiteOnBlack", table.ColorOptionsMagentaWhiteOnBlack)
+		obj.Set("ColorOptionsRedWhiteOnBlack", table.ColorOptionsRedWhiteOnBlack)
+		obj.Set("ColorOptionsYellowWhiteOnBlack", table.ColorOptionsYellowWhiteOnBlack)
+		obj.Set("OptionsDefault", table.OptionsDefault)
+		obj.Set("OptionsNoBorders", table.OptionsNoBorders)
+		obj.Set("OptionsNoBordersAndSeparators", table.OptionsNoBordersAndSeparators)
+		obj.Set("TitleOptionsDefault", table.TitleOptionsDefault)
+		obj.Set("TitleOptionsBright", table.TitleOptionsBright)
+		obj.Set("TitleOptionsBlackOnBlue", table.TitleOptionsBlackOnBlue)
+		obj.Set("TitleOptionsBlackOnCyan", table.TitleOptionsBlackOnCyan)
+		obj.Set("TitleOptionsBlackOnGreen", table.TitleOptionsBlackOnGreen)
+		obj.Set("TitleOptionsBlackOnMagenta", table.TitleOptionsBlackOnMagenta)
+		obj.Set("TitleOptionsBlackOnRed", table.TitleOptionsBlackOnRed)
+		obj.Set("TitleOptionsBlackOnYellow", table.TitleOptionsBlackOnYellow)
+		obj.Set("TitleOptionsBlueOnBlack", table.TitleOptionsBlueOnBlack)
+		obj.Set("TitleOptionsCyanOnBlack", table.TitleOptionsCyanOnBlack)
+		obj.Set("TitleOptionsGreenOnBlack", table.TitleOptionsGreenOnBlack)
+		obj.Set("TitleOptionsMagentaOnBlack", table.TitleOptionsMagentaOnBlack)
+		obj.Set("TitleOptionsRedOnBlack", table.TitleOptionsRedOnBlack)
+		obj.Set("TitleOptionsYellowOnBlack", table.TitleOptionsYellowOnBlack)
+		obj.Set("FormatOptionsDefault", table.FormatOptionsDefault)
+		obj.Set("AutoIndexColumnID", table.AutoIndexColumnID)
+		obj.Set("Asc", table.Asc)
+		obj.Set("AscNumeric", table.AscNumeric)
+		obj.Set("Dsc", table.Dsc)
+		obj.Set("DscNumeric", table.DscNumeric)
+
+	})
+
+	set(cliUtils, "Progress", func() any { return progress.NewWriter() }, func(obj *goja.Object) {
+		obj.Set("DefaultLengthTracker", progress.DefaultLengthTracker)
+		obj.Set("DefaultUpdateFrequency", progress.DefaultUpdateFrequency)
+		obj.Set("StyleDefault", progress.StyleDefault)
+		obj.Set("StyleBlocks", progress.StyleBlocks)
+		obj.Set("StyleCircle", progress.StyleCircle)
+		obj.Set("StyleRhombus", progress.StyleRhombus)
+		obj.Set("StyleCharsDefault", progress.StyleCharsDefault)
+		obj.Set("StyleCharsBlocks", progress.StyleCharsBlocks)
+		obj.Set("StyleCharsCircle", progress.StyleCharsCircle)
+		obj.Set("StyleCharsRhombus", progress.StyleCharsRhombus)
+		obj.Set("StyleColorsDefault", progress.StyleColorsDefault)
+		obj.Set("StyleColorsExample", progress.StyleColorsExample)
+		set(obj, "Units", func() any { return &progress.Units{} }, func(obj *goja.Object) {})
+		set(obj, "Tracker", func() any { return &progress.Tracker{} }, func(obj *goja.Object) {})
+		set(obj, "StyleOptions", func() any { return &progress.StyleOptions{} }, func(obj *goja.Object) {})
+		set(obj, "StyleColors", func() any { return &progress.StyleColors{} }, func(obj *goja.Object) {})
+		set(obj, "Style", func() any { return &progress.Style{} }, func(obj *goja.Object) {})
+		set(obj, "StyleChars", func() any { return &progress.StyleChars{} }, func(obj *goja.Object) {})
+		obj.Set("UnitsDefault", progress.UnitsDefault)
+		obj.Set("UnitsBytes", progress.UnitsBytes)
+		obj.Set("UnitsCurrencyDollar", progress.UnitsCurrencyDollar)
+		obj.Set("UnitsCurrencyEuro", progress.UnitsCurrencyEuro)
+		obj.Set("UnitsCurrencyPound", progress.UnitsCurrencyPound)
+		obj.Set("StyleOptionsDefault", progress.StyleOptionsDefault)
+		obj.Set("FormatBytes", progress.FormatBytes)
+		obj.Set("FormatNumber", progress.FormatNumber)
+		obj.Set("PositionLeft", progress.PositionLeft)
+		obj.Set("PositionRight", progress.PositionRight)
+		obj.Set("SortByNone", progress.SortByNone)
+		obj.Set("SortByMessage", progress.SortByMessage)
+		obj.Set("SortByMessageDsc", progress.SortByMessageDsc)
+		obj.Set("SortByPercent", progress.SortByPercent)
+		obj.Set("SortByPercentDsc", progress.SortByPercentDsc)
+		obj.Set("SortByValue", progress.SortByValue)
+		obj.Set("SortByValueDsc", progress.SortByValueDsc)
+
+	})
+	set(cliUtils, "List", func() any { return tableList.NewWriter() }, func(obj *goja.Object) {
+		obj.Set("DefaultHTMLCSSClass", tableList.DefaultHTMLCSSClass)
+		obj.Set("StyleDefault", tableList.StyleDefault)
+		obj.Set("StyleBulletCircle", tableList.StyleBulletCircle)
+		obj.Set("StyleBulletFlower", tableList.StyleBulletFlower)
+		obj.Set("StyleBulletSquare", tableList.StyleBulletSquare)
+		obj.Set("StyleBulletStar", tableList.StyleBulletStar)
+		obj.Set("StyleBulletTriangle", tableList.StyleBulletTriangle)
+		obj.Set("StyleConnectedBold", tableList.StyleConnectedBold)
+		obj.Set("StyleConnectedDouble", tableList.StyleConnectedDouble)
+		obj.Set("StyleConnectedLight", tableList.StyleConnectedLight)
+		obj.Set("StyleConnectedRounded", tableList.StyleConnectedRounded)
+		obj.Set("StyleMarkdown", tableList.StyleMarkdown)
+		set(obj, "Style", func() any { return &tableList.Style{} }, func(call *goja.Object) {})
+	})
+	textCLI := vm.NewObject()
+	textCLI.Set("EnableColors", text.EnableColors)
+	textCLI.Set("DisableColors", text.DisableColors)
+	textCLI.Set("ANSICodesSupported", text.ANSICodesSupported)
+	textCLI.Set("EscapeReset", text.EscapeReset)
+	textCLI.Set("EscapeStart", text.EscapeStart)
+	textCLI.Set("EscapeStartRune", text.EscapeStartRune)
+	textCLI.Set("EscapeStop", text.EscapeStop)
+	textCLI.Set("EscapeStopRune", text.EscapeStopRune)
+	textCLI.Set("Escape", text.Escape)
+	textCLI.Set("Filter", text.Filter)
+	textCLI.Set("InsertEveryN", text.InsertEveryN)
+	textCLI.Set("LongestLineLen", text.LongestLineLen)
+	textCLI.Set("Pad", text.Pad)
+	textCLI.Set("RepeatAndTrim", text.RepeatAndTrim)
+	textCLI.Set("RuneCount", text.RuneWidthWithoutEscSequences)
+	textCLI.Set("RuneWidthWithoutEscSequences", text.RuneWidthWithoutEscSequences)
+	textCLI.Set("RuneWidth", text.RuneWidth)
+	textCLI.Set("Snip", text.Snip)
+	textCLI.Set("StripEscape", text.StripEscape)
+	textCLI.Set("Trim", text.Trim)
+	textCLI.Set("WrapHard", text.WrapHard)
+	textCLI.Set("WrapSoft", text.WrapSoft)
+	textCLI.Set("WrapText", text.WrapText)
+	textCLI.Set("AlignAuto", text.AlignAuto)
+	textCLI.Set("AlignCenter", text.AlignCenter)
+	textCLI.Set("AlignDefault", text.AlignDefault)
+	textCLI.Set("AlignJustify", text.AlignJustify)
+	textCLI.Set("AlignLeft", text.AlignLeft)
+	textCLI.Set("AlignRight", text.AlignRight)
+	textCLI.Set("VAlignBottom", text.VAlignBottom)
+	textCLI.Set("VAlignDefault", text.VAlignDefault)
+	textCLI.Set("VAlignMiddle", text.VAlignMiddle)
+	textCLI.Set("VAlignTop", text.VAlignTop)
+	textCLI.Set("Reset", text.Reset)
+	textCLI.Set("Bold", text.Bold)
+	textCLI.Set("Faint", text.Faint)
+	textCLI.Set("Italic", text.Italic)
+	textCLI.Set("Underline", text.Underline)
+	textCLI.Set("BlinkSlow", text.BlinkSlow)
+	textCLI.Set("BlinkRapid", text.BlinkRapid)
+	textCLI.Set("ReverseVideo", text.ReverseVideo)
+	textCLI.Set("Concealed", text.Concealed)
+	textCLI.Set("CrossedOut", text.CrossedOut)
+	textCLI.Set("FgBlack", text.FgBlack)
+	textCLI.Set("FgRed", text.FgRed)
+	textCLI.Set("FgGreen", text.FgGreen)
+	textCLI.Set("FgYellow", text.FgYellow)
+	textCLI.Set("FgBlue", text.FgBlue)
+	textCLI.Set("FgMagenta", text.FgMagenta)
+	textCLI.Set("FgCyan", text.FgCyan)
+	textCLI.Set("FgWhite", text.FgWhite)
+	textCLI.Set("FgHiBlack", text.FgHiBlack)
+	textCLI.Set("FgHiRed", text.FgHiRed)
+	textCLI.Set("FgHiGreen", text.FgHiGreen)
+	textCLI.Set("FgHiYellow", text.FgHiYellow)
+	textCLI.Set("FgHiBlue", text.FgHiBlue)
+	textCLI.Set("FgHiMagenta", text.FgHiMagenta)
+	textCLI.Set("FgHiCyan", text.FgHiCyan)
+	textCLI.Set("FgHiWhite", text.FgHiWhite)
+	textCLI.Set("BgBlack", text.BgBlack)
+	textCLI.Set("BgRed", text.BgRed)
+	textCLI.Set("BgGreen", text.BgGreen)
+	textCLI.Set("BgYellow", text.BgYellow)
+	textCLI.Set("BgBlue", text.BgBlue)
+	textCLI.Set("BgMagenta", text.BgMagenta)
+	textCLI.Set("BgCyan", text.BgCyan)
+	textCLI.Set("BgWhite", text.BgWhite)
+	textCLI.Set("BgHiBlack", text.BgHiBlack)
+	textCLI.Set("BgHiRed", text.BgHiRed)
+	textCLI.Set("BgHiGreen", text.BgHiGreen)
+	textCLI.Set("BgHiYellow", text.BgHiYellow)
+	textCLI.Set("BgHiBlue", text.BgHiBlue)
+	textCLI.Set("BgHiMagenta", text.BgHiMagenta)
+	textCLI.Set("BgHiCyan", text.BgHiCyan)
+	textCLI.Set("BgHiWhite", text.BgHiWhite)
+	textCLI.Set("CursorDown", text.CursorDown)
+	textCLI.Set("CursorLeft", text.CursorLeft)
+	textCLI.Set("CursorRight", text.CursorRight)
+	textCLI.Set("CursorUp", text.CursorUp)
+	textCLI.Set("EraseLine", text.EraseLine)
+	textCLI.Set("FormatDefault", text.FormatDefault)
+	textCLI.Set("FormatLower", text.FormatLower)
+	textCLI.Set("FormatTitle", text.FormatTitle)
+	textCLI.Set("FormatUpper", text.FormatUpper)
+	textCLI.Set("NewJSONTransformer", text.NewJSONTransformer)
+	textCLI.Set("NewNumberTransformer", text.NewNumberTransformer)
+	textCLI.Set("NewTimeTransformer", text.NewTimeTransformer)
+	textCLI.Set("NewURLTransformer", text.NewURLTransformer)
+	textCLI.Set("NewUnixTimeTransformer", text.NewUnixTimeTransformer)
+	textCLI.Set("Colors", func(colors ...text.Color) text.Colors {
+		return colors
+	})
+	cliUtils.Set("Text", textCLI)
+}
 func routerBinds(app core.App, loader *goja.Runtime, executors *vmsPool) {
 	loader.Set("routerAdd", func(method string, path string, handler goja.Value, middlewares ...goja.Value) {
 		wrappedMiddlewares, err := wrapMiddlewares(executors, middlewares...)

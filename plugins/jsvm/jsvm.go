@@ -65,6 +65,13 @@ type Config struct {
 	// HookdsDir file ending in ".pb.js" or ".pb.ts" (the last one is to enforce IDE linters).
 	HooksFilesPattern string
 
+	// HooksWatchPattern specifies a regular expression pattern that
+	// identify which file will reload on changes.
+	//
+	// If not set it fallbacks to HooksFilesPattern, aka. any
+	// HookdsDir file ending in ".pb.js" or ".pb.ts" (the last one is to enforce IDE linters).
+	HooksWatchPattern string
+
 	// HooksPoolSize specifies how many goja.Runtime instances to prewarm
 	// and keep for the JS app hooks gorotines execution.
 	//
@@ -124,6 +131,10 @@ func Register(app core.App, config Config) error {
 		p.config.HooksFilesPattern = `^.*(\.pb\.js|\.pb\.ts)$`
 	}
 
+	if p.config.HooksWatchPattern == "" {
+		p.config.HooksWatchPattern = p.config.HooksFilesPattern
+	}
+
 	if p.config.MigrationsFilesPattern == "" {
 		p.config.MigrationsFilesPattern = `^.*(\.js|\.ts)$`
 	}
@@ -170,6 +181,7 @@ func (p *plugin) registerMigrations() error {
 			loop := NewEventLoop()
 			loop.Stop()
 			baseBinds(loop.vm)
+			cliUtilsBinds(loop.vm)
 			dbxBinds(loop.vm)
 			tokensBinds(loop.vm)
 			securityBinds(loop.vm)
@@ -252,8 +264,8 @@ func (p *plugin) registerHooks() error {
 		// requireRegistry.Enable(vm)
 		console.Enable(vm)
 		process.Enable(vm)
-
 		baseBinds(vm)
+		cliUtilsBinds(vm)
 		dbxBinds(vm)
 		filesystemBinds(vm)
 		tokensBinds(vm)
@@ -282,11 +294,14 @@ func (p *plugin) registerHooks() error {
 		if len(s) > 0 {
 			vm.Set(strings.ToUpper(s[:1])+s[1:], p.app)
 		}
-		vm.Set("App", p.app)
 		vm.Set("$app", p.app)
+		vm.Set("App", p.app)
+
 		vm.Set("$template", templateRegistry)
 		vm.Set("Template", templateRegistry)
+
 		vm.Set("__hooks", absHooksDir)
+		vm.Set("__scripts", absHooksDir)
 
 		if p.config.OnInit != nil {
 			p.config.OnInit(vm)
@@ -424,8 +439,12 @@ func (p *plugin) watchHooks() error {
 		return nil
 	})
 
+	var exp *regexp.Regexp
+	if p.config.HooksWatchPattern != "" {
+		exp, _ = regexp.Compile(p.config.HooksWatchPattern)
+	}
 	// start listening for events.
-	go func() {
+	go func(exp *regexp.Regexp) {
 		defer stopDebounceTimer()
 
 		for {
@@ -438,13 +457,15 @@ func (p *plugin) watchHooks() error {
 				stopDebounceTimer()
 
 				debounceTimer = time.AfterFunc(50*time.Millisecond, func() {
-					// app restart is currently not supported on Windows
-					if runtime.GOOS == "windows" {
-						color.Yellow("File %s changed, please restart the app", event.Name)
-					} else {
-						color.Yellow("File %s changed, restarting...", event.Name)
-						if err := p.app.Restart(); err != nil {
-							color.Red("Failed to restart the app:", err)
+					if exp == nil || exp.MatchString(event.Name) {
+						// app restart is currently not supported on Windows
+						if runtime.GOOS == "windows" {
+							color.Yellow("File %s changed, please restart the app", event.Name)
+						} else {
+							color.Yellow("File %s changed, restarting...", event.Name)
+							if err := p.app.Restart(); err != nil {
+								color.Red("Failed to restart the app:", err)
+							}
 						}
 					}
 				})
@@ -455,17 +476,16 @@ func (p *plugin) watchHooks() error {
 				color.Red("Watch error:", err)
 			}
 		}
-	}()
+	}(exp)
 
 	// add directories to watch
 	//
 	// @todo replace once recursive watcher is added (https://github.com/fsnotify/fsnotify/issues/18)
 	dirsErr := filepath.Walk(p.config.HooksDir, func(path string, info fs.FileInfo, err error) error {
-		// ignore hidden directories and node_modules
+		// ignore hidden directories,not HooksWatchPattern and node_modules
 		if !info.IsDir() || info.Name() == "node_modules" || strings.HasPrefix(info.Name(), ".") {
 			return nil
 		}
-
 		return watcher.Add(path)
 	})
 	if dirsErr != nil {

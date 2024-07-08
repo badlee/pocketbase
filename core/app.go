@@ -15,6 +15,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/mailer"
 	"github.com/pocketbase/pocketbase/tools/store"
 	"github.com/pocketbase/pocketbase/tools/subscriptions"
+	flag "github.com/spf13/pflag"
 )
 
 // App defines the main PocketBase app interface.
@@ -64,6 +65,12 @@ type App interface {
 
 	// Settings returns the loaded app settings.
 	Settings() *settings.Settings
+
+	// UserDefinedFlags returns the user defined flags.
+	UserDefinedFlags() *flag.FlagSet
+
+	// Config returns the configuration of the runing application.
+	Config() *BaseAppConfig
 
 	// Deprecated: Use app.Store() instead.
 	Cache() *store.Store[any]

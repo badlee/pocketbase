@@ -22,7 +22,7 @@ func TestNew(t *testing.T) {
 	os.Args = append(
 		os.Args,
 		"--dir=test_dir",
-		"--encryptionEnv=test_encryption_env",
+		"--encryption-env=test_encryption_env",
 		"--debug=true",
 	)
 
@@ -95,7 +95,7 @@ func TestNewWithConfigAndFlags(t *testing.T) {
 	os.Args = append(
 		os.Args,
 		"--dir=test_dir_flag",
-		"--encryptionEnv=test_encryption_env_flag",
+		"--encryption-env=test_encryption_env_flag",
 		"--debug=false",
 	)
 
