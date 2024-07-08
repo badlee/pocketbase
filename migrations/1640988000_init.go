@@ -39,6 +39,7 @@ func init() {
 			CREATE TABLE {{_admins}} (
 				[[id]]              TEXT PRIMARY KEY NOT NULL,
 				[[avatar]]          INTEGER DEFAULT 0 NOT NULL,
+				[[name]]          	TEXT DEFAULT "" NOT NULL,
 				[[email]]           TEXT UNIQUE NOT NULL,
 				[[tokenKey]]        TEXT UNIQUE NOT NULL,
 				[[passwordHash]]    TEXT NOT NULL,

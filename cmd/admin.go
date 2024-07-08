@@ -192,6 +192,7 @@ func adminListCommand(app core.App) *cobra.Command {
 	}
 	command := &cobra.Command{
 		Use:     "list",
+		Aliases: []string{"ls"},
 		Example: "admin list",
 		Short:   defUsage,
 		// prevents printing the error log twice

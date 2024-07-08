@@ -25,6 +25,7 @@ type healthCheckResponse struct {
 	Code    int    `json:"code"`
 	Data    struct {
 		CanBackup bool `json:"canBackup"`
+		HasAdmins bool `json:"hasAdmins"`
 	} `json:"data"`
 }
 
@@ -38,6 +39,10 @@ func (api *healthApi) healthCheck(c echo.Context) error {
 	resp.Code = http.StatusOK
 	resp.Message = "API is healthy."
 	resp.Data.CanBackup = !api.app.Store().Has(core.StoreKeyActiveBackup)
+	resp.Data.HasAdmins = false
+	if total, err := api.app.Dao().TotalAdmins(); err == nil {
+		resp.Data.HasAdmins = total > 0
+	}
 
 	return c.JSON(http.StatusOK, resp)
 }

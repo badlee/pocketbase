@@ -16,6 +16,7 @@ type Admin struct {
 	BaseModel
 
 	Avatar          int            `db:"avatar" json:"avatar"`
+	Name            string         `db:"name" json:"name"`
 	Email           string         `db:"email" json:"email"`
 	TokenKey        string         `db:"tokenKey" json:"-"`
 	PasswordHash    string         `db:"passwordHash" json:"-"`
