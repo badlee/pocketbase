@@ -1,6 +1,7 @@
 package apis
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -46,7 +47,7 @@ func (api *healthApi) healthCheck(c echo.Context) error {
 	resp := new(healthCheckResponse)
 	resp.Code = http.StatusOK
 	resp.Message = "API is healthy."
-	resp.Data.Version = api.app.Config().RootCmd.Version
+	resp.Data.Version = fmt.Sprintf("%s v%s", api.app.Config().RootCmd.Name(), api.app.Config().RootCmd.Version)
 	resp.Data.CanBackup = !api.app.Store().Has(core.StoreKeyActiveBackup)
 	resp.Data.HasAdmins = false
 	resp.Data.ValidToken = admin != nil || record != nil
