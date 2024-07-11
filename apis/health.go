@@ -47,7 +47,7 @@ func (api *healthApi) healthCheck(c echo.Context) error {
 	resp.Message = "API is healthy."
 	resp.Data.CanBackup = !api.app.Store().Has(core.StoreKeyActiveBackup)
 	resp.Data.HasAdmins = false
-	resp.Data.ValidToken = admin == nil && record == nil
+	resp.Data.ValidToken = admin != nil || record != nil
 	resp.Data.AppName = api.app.Settings().Meta.AppName
 	resp.Data.SenderName = api.app.Settings().Meta.SenderName
 	resp.Data.SenderAddress = api.app.Settings().Meta.SenderAddress
