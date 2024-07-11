@@ -27,6 +27,7 @@ type healthCheckResponse struct {
 	Data    struct {
 		CanBackup     bool   `json:"canBackup"`
 		HasAdmins     bool   `json:"hasAdmins"`
+		Version       string `json:"version"`
 		ValidToken    bool   `json:"validToken"`
 		AppName       string `json:"appName"`
 		SenderName    string `json:"senderName"`
@@ -45,6 +46,7 @@ func (api *healthApi) healthCheck(c echo.Context) error {
 	resp := new(healthCheckResponse)
 	resp.Code = http.StatusOK
 	resp.Message = "API is healthy."
+	resp.Data.Version = api.app.Config().RootCmd.Version
 	resp.Data.CanBackup = !api.app.Store().Has(core.StoreKeyActiveBackup)
 	resp.Data.HasAdmins = false
 	resp.Data.ValidToken = admin != nil || record != nil
