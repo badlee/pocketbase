@@ -25,6 +25,7 @@ type Settings struct {
 	mux sync.RWMutex
 
 	Meta    MetaConfig    `form:"meta" json:"meta"`
+	Users   UsersConfig   `form:"users" json:"users"`
 	Logs    LogsConfig    `form:"logs" json:"logs"`
 	Smtp    SmtpConfig    `form:"smtp" json:"smtp"`
 	S3      S3Config      `form:"s3" json:"s3"`
@@ -76,6 +77,11 @@ func New(DefaultAppName *string) *Settings {
 		defaultAppName = *DefaultAppName
 	}
 	return &Settings{
+		Users: UsersConfig{
+			AllowRegister:                        true,
+			CreateOrganisationOnUserRegistration: false,
+			DefaultOrganisation:                  "",
+		},
 		Meta: MetaConfig{
 			AppName:                    defaultAppName,
 			AppUrl:                     "http://localhost:8090",
@@ -515,6 +521,12 @@ type MetaConfig struct {
 	VerificationTemplate       EmailTemplate `form:"verificationTemplate" json:"verificationTemplate"`
 	ResetPasswordTemplate      EmailTemplate `form:"resetPasswordTemplate" json:"resetPasswordTemplate"`
 	ConfirmEmailChangeTemplate EmailTemplate `form:"confirmEmailChangeTemplate" json:"confirmEmailChangeTemplate"`
+}
+
+type UsersConfig struct {
+	DefaultOrganisation                  string `form:"defaultOrganisation" json:"defaultOrganisation"`
+	AllowRegister                        bool   `form:"allowRegister" json:"allowRegister"`
+	CreateOrganisationOnUserRegistration bool   `form:"createNewOrganisationOnNewUserRegister" json:"createNewOrganisationOnNewUserRegister"`
 }
 
 // Validate makes MetaConfig validatable by implementing [validation.Validatable] interface.

@@ -253,11 +253,17 @@ func (dao *Dao) Delete(m models.Model) error {
 // To explicitly mark a model for update you can use m.MarkAsNotNew().
 func (dao *Dao) Save(m models.Model) error {
 	if m.IsNew() {
+		if !m.HasId() {
+			m.RefreshId()
+		}
+		if m.GetCreated().IsZero() {
+			m.RefreshCreated()
+		}
 		return dao.lockRetry(func(retryDao *Dao) error {
 			return retryDao.create(m)
 		})
 	}
-
+	m.RefreshUpdated()
 	return dao.lockRetry(func(retryDao *Dao) error {
 		return retryDao.update(m)
 	})

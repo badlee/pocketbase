@@ -2,6 +2,7 @@
 package migrations
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 
@@ -53,6 +54,7 @@ func init() {
 				[[system]]     BOOLEAN DEFAULT FALSE NOT NULL,
 				[[type]]       TEXT DEFAULT "base" NOT NULL,
 				[[name]]       TEXT UNIQUE NOT NULL,
+				[[label]]      TEXT DEFAULT "" NOT NULL,
 				[[schema]]     JSON DEFAULT "[]" NOT NULL,
 				[[indexes]]    JSON DEFAULT "[]" NOT NULL,
 				[[listRule]]   TEXT DEFAULT NULL,
@@ -94,38 +96,175 @@ func init() {
 
 		dao := daos.New(db)
 
-		// inserts default settings
-		// -----------------------------------------------------------
-		defaultSettings := settings.New(nil)
-		if err := dao.SaveSettings(defaultSettings); err != nil {
-			return err
+		userCollectionName := "users"
+		getCollectionName := func(name string, auth bool) string {
+			prefix := ""
+			if auth {
+				prefix = "auth_"
+			}
+			return fmt.Sprintf("_pb_%s_%s", name, prefix)
+		}
+		newCollection := func(name string, auth bool, fields ...*schema.SchemaField) (*models.Collection, error) {
+			// inserts a new system collection
+			// -----------------------------------------------------------
+			col := &models.Collection{}
+			col.MarkAsNew()
+			col.System = true
+			rules := fmt.Sprintf("@request.auth.id != '' && @request.auth.collectionName = '%s'", userCollectionName)
+			colType := models.CollectionTypeBase
+			var options any
+			options = models.CollectionBaseOptions{}
+			if auth {
+				colType = models.CollectionTypeAuth
+				rules = "id = @request.auth.id"
+				options = models.CollectionAuthOptions{
+					ManageRule:        nil,
+					AllowOAuth2Auth:   true,
+					AllowUsernameAuth: true,
+					AllowEmailAuth:    true,
+					MinPasswordLength: 10,
+					RequireEmail:      false,
+					OnlyVerified:      false,
+				}
+			}
+			col.Id = getCollectionName(name, auth)
+			col.Name = name
+			col.Type = colType
+			col.ListRule = types.Pointer(rules)
+			col.ViewRule = types.Pointer(rules)
+			col.CreateRule = types.Pointer("")
+			col.UpdateRule = types.Pointer(rules)
+			col.DeleteRule = types.Pointer(rules)
+
+			// set auth options
+			col.SetOptions(options)
+
+			// set optional default fields
+			col.Schema = schema.NewSchema(fields...)
+			if err := dao.SaveCollection(col); err != nil {
+				return nil, err
+			}
+			return col, nil
 		}
 
 		// inserts the system users collection
 		// -----------------------------------------------------------
-		usersCollection := &models.Collection{}
-		usersCollection.MarkAsNew()
-		usersCollection.Id = "_pb_users_auth_"
-		usersCollection.Name = "users"
-		usersCollection.Type = models.CollectionTypeAuth
-		usersCollection.ListRule = types.Pointer("id = @request.auth.id")
-		usersCollection.ViewRule = types.Pointer("id = @request.auth.id")
-		usersCollection.CreateRule = types.Pointer("")
-		usersCollection.UpdateRule = types.Pointer("id = @request.auth.id")
-		usersCollection.DeleteRule = types.Pointer("id = @request.auth.id")
+		droitsCollection, err := newCollection(
+			"droits",
+			false,
+			&schema.SchemaField{
+				Id:      "droits_key",
+				Type:    schema.FieldTypeText,
+				Unique:  true,
+				Name:    "key",
+				Options: &schema.TextOptions{},
+			},
+			&schema.SchemaField{
+				Id:      "droits_value",
+				Type:    schema.FieldTypeText,
+				Name:    "value",
+				Options: &schema.TextOptions{},
+			},
+			&schema.SchemaField{
+				Id:      "droits_group",
+				Type:    schema.FieldTypeText,
+				Name:    "group",
+				Options: &schema.TextOptions{},
+			},
+			&schema.SchemaField{
+				Id:      "droits_desc",
+				Type:    schema.FieldTypeText,
+				Name:    "desc",
+				Options: &schema.TextOptions{},
+			},
+			&schema.SchemaField{
+				Id:   "droits_parent",
+				Type: schema.FieldTypeRelation,
+				Name: "parent",
+				Options: &schema.RelationOptions{
+					CollectionId:  getCollectionName("droits", false),
+					CascadeDelete: true,
+					DisplayFields: []string{"value"},
+				},
+			},
+		)
 
-		// set auth options
-		usersCollection.SetOptions(models.CollectionAuthOptions{
-			ManageRule:        nil,
-			AllowOAuth2Auth:   true,
-			AllowUsernameAuth: true,
-			AllowEmailAuth:    true,
-			MinPasswordLength: 8,
-			RequireEmail:      false,
-		})
+		if err != nil {
+			return err
+		}
+		organisationCollection, err := newCollection(
+			"organisations",
+			false,
+			&schema.SchemaField{
+				Id:       "organisations_name",
+				Type:     schema.FieldTypeText,
+				Required: true,
+				Unique:   true,
+				Name:     "name",
+				Options:  &schema.TextOptions{},
+			},
+			&schema.SchemaField{
+				Id:      "organisations_address",
+				Type:    schema.FieldTypeText,
+				Name:    "address",
+				Options: &schema.TextOptions{},
+			},
+			&schema.SchemaField{
+				Id:      "organisations_country",
+				Type:    schema.FieldTypeText,
+				Name:    "country",
+				Options: &schema.TextOptions{},
+			},
+			&schema.SchemaField{
+				Id:      "organisations_email",
+				Type:    schema.FieldTypeEmail,
+				Name:    "email",
+				Options: &schema.TextOptions{},
+			},
+		)
+		if err != nil {
+			return err
+		}
+		organisationDroitsCollection, err := newCollection(
+			"droits_organisations",
+			false,
+			&schema.SchemaField{
+				Id:       "droits_organisations_droit",
+				Type:     schema.FieldTypeRelation,
+				Name:     "droit",
+				Required: true,
+				Options: &schema.RelationOptions{
+					CollectionId:  droitsCollection.Id,
+					CascadeDelete: true,
+					DisplayFields: []string{"value"},
+				},
+			},
+			&schema.SchemaField{
+				Id:       "droits_organisations_organisation",
+				Type:     schema.FieldTypeRelation,
+				Name:     "organisation",
+				Required: true,
+				Options: &schema.RelationOptions{
+					CollectionId:  getCollectionName("organisations", false),
+					CascadeDelete: true,
+					DisplayFields: []string{"name"},
+				},
+			},
 
-		// set optional default fields
-		usersCollection.Schema = schema.NewSchema(
+			&schema.SchemaField{
+				Id:       "droits_organisations_active",
+				Type:     schema.FieldTypeBool,
+				Name:     "active",
+				Required: true,
+				Options:  &schema.BoolOptions{},
+			},
+		)
+		if err != nil {
+			return err
+		}
+		usersCollection, err := newCollection(
+			userCollectionName,
+			true,
 			&schema.SchemaField{
 				Id:      "users_name",
 				Type:    schema.FieldTypeText,
@@ -148,12 +287,84 @@ func init() {
 					},
 				},
 			},
+			&schema.SchemaField{
+				Id:       "users_organisation",
+				Type:     schema.FieldTypeRelation,
+				Name:     "organisation",
+				Required: true,
+				Options: &schema.RelationOptions{
+					CollectionId:  organisationCollection.Id,
+					CascadeDelete: true,
+					DisplayFields: []string{"name"},
+				},
+			},
 		)
 
-		return dao.SaveCollection(usersCollection)
+		if err != nil {
+			return err
+		}
+		_, err = newCollection(
+			"droits_users",
+			false,
+			&schema.SchemaField{
+				Id:       "droits_users_droit",
+				Type:     schema.FieldTypeRelation,
+				Name:     "droit",
+				Required: true,
+				Options: &schema.RelationOptions{
+					CollectionId:  organisationDroitsCollection.Id,
+					CascadeDelete: true,
+					DisplayFields: []string{"value"},
+				},
+			},
+			&schema.SchemaField{
+				Id:       "droits_users_user",
+				Type:     schema.FieldTypeRelation,
+				Name:     "user",
+				Required: true,
+				Options: &schema.RelationOptions{
+					CollectionId:  usersCollection.Id,
+					CascadeDelete: true,
+					DisplayFields: []string{"name"},
+				},
+			},
+			&schema.SchemaField{
+				Id:       "droits_users_active",
+				Type:     schema.FieldTypeBool,
+				Name:     "active",
+				Required: true,
+				Options:  &schema.BoolOptions{},
+			},
+		)
+		if err != nil {
+			return err
+		}
+		// usersDroitsCollection.CreateRule = types.Pointer(fmt.Sprintf("@request.auth.id != '' && @request.auth.collectionName = '%s' && droit.organisation ?= @request.auth.organisation", userCollectionName))
+		// if err := dao.SaveCollection(usersDroitsCollection); err != nil {
+		// 	return err
+		// }
+		// CREATE THE DEFAULT LANGUAGE
+		record := models.NewRecord(organisationCollection)
+		record.Set("name", "Acme")
+		if err := dao.SaveRecord(record); err != nil {
+			return err
+		}
+		// inserts default settings
+		// -----------------------------------------------------------
+		defaultSettings := settings.New(nil)
+		defaultSettings.Users.DefaultOrganisation = record.Id
+		if err := dao.SaveSettings(defaultSettings); err != nil {
+			return err
+		}
+
+		return nil
 	}, func(db dbx.Builder) error {
 		tables := []string{
 			"users",
+			"organisations",
+			"droits",
+			"droits_organisations",
+			"droits_users",
 			"_externalAuths",
 			"_params",
 			"_collections",

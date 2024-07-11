@@ -70,9 +70,6 @@ func adminCreateCommand(app core.App) *cobra.Command {
 				color.Red("%s", err)
 				return nil
 			}
-			if !admin.IsNew() {
-				admin.MarkAsNew()
-			}
 
 			admin.Avatar = rand.IntN(9)
 
@@ -212,14 +209,14 @@ func adminListCommand(app core.App) *cobra.Command {
 				}
 				t := table.NewWriter()
 
-				t.AppendHeader(table.Row{"Email", "Is New", "Created", "Updated", "Last Reset"})
+				t.AppendHeader(table.Row{"Email", "Created", "Updated", "Last Reset"})
 				t.AppendSeparator()
 				var index int = 0
 				for _, admin := range admins {
 					index = index + 1
-					t.AppendRow([]interface{}{admin.Email, admin.IsNew(), admin.Created, admin.Updated, admin.LastResetSentAt})
+					t.AppendRow([]interface{}{admin.Email, admin.Created.Time().Format("02/01/2006 15:04"), admin.Updated.Time().Format("02/01/2006 15:04"), admin.LastResetSentAt.Time().Format("02/01/2006 15:04")})
 				}
-				t.AppendFooter(table.Row{"Total", total, total, total, total}, table.RowConfig{
+				t.AppendFooter(table.Row{"Total", total, total, total}, table.RowConfig{
 					AutoMerge: true, AutoMergeAlign: text.AlignRight,
 				})
 				// t.SetStyle(table.StyleColoredBlackOnCyanWhite)

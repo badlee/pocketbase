@@ -1,7 +1,10 @@
 package apis
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -159,6 +162,84 @@ func (api *recordApi) create(c echo.Context) error {
 	if collection == nil {
 		return NewNotFoundError("", "Missing collection context.")
 	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return err
+	}
+	print(payload)
+	print("\n\n")
+	v, f := payload["organisation"]
+
+	if collection.Name == "users" && (!f || v == "") {
+		updateOrganisation := func(id string) error {
+			payload["organisation"] = id
+			new_body_content, err := json.Marshal(payload)
+			if err != nil {
+				return err
+			}
+			c.Request().Body = io.NopCloser(bytes.NewReader(new_body_content))
+			return nil
+		}
+		if !api.app.Settings().Users.CreateOrganisationOnUserRegistration {
+			// set the default organisation
+			print("set the default organisation\n")
+			if err := updateOrganisation(api.app.Settings().Users.DefaultOrganisation); err != nil {
+				return err
+			}
+		} else {
+
+			collection, err := api.app.Dao().FindCollectionByNameOrId("organisations")
+			if err != nil {
+				return err
+			}
+
+			_record := models.NewRecord(collection)
+			_record.RefreshId() // for id
+			event := new(core.RecordCreateEvent)
+			event.HttpContext = c
+			event.Collection = collection
+			event.Record = _record
+			_form := forms.NewRecordUpsert(api.app, _record)
+
+			_form.LoadData(map[string]any{
+				"name":   fmt.Sprintf("%s's Organisation", c.Request().Form.Get("username")),
+				"email":  c.Request().Form.Get("email"),
+				"active": true,
+			})
+			// create the record
+			err = _form.Submit(func(next forms.InterceptorNextFunc[*models.Record]) forms.InterceptorNextFunc[*models.Record] {
+				return func(m *models.Record) error {
+					event.Record = m
+
+					return api.app.OnRecordBeforeCreateRequest().Trigger(event, func(e *core.RecordCreateEvent) error {
+						if err := next(e.Record); err != nil {
+							return NewBadRequestError("Failed to create record.", err)
+						}
+
+						if err := EnrichRecord(e.HttpContext, api.app.Dao(), e.Record); err != nil {
+							api.app.Logger().Debug(
+								"Failed to enrich create record",
+								slog.String("id", e.Record.Id),
+								slog.String("collectionName", e.Record.Collection().Name),
+								slog.String("error", err.Error()),
+							)
+						}
+
+						return api.app.OnRecordAfterCreateRequest().Trigger(event, func(e *core.RecordCreateEvent) error {
+							// set the default organisation
+							if err := updateOrganisation(_record.Id); err != nil {
+								return err
+							}
+							return nil
+						})
+					})
+				}
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	requestInfo := RequestInfo(c)
 
@@ -181,6 +262,7 @@ func (api *recordApi) create(c echo.Context) error {
 
 		testForm := forms.NewRecordUpsert(api.app, testRecord)
 		testForm.SetFullManageAccess(true)
+
 		if err := testForm.LoadRequest(c.Request(), ""); err != nil {
 			return NewBadRequestError("Failed to load the submitted data due to invalid formatting.", err)
 		}
@@ -218,16 +300,13 @@ func (api *recordApi) create(c echo.Context) error {
 			return NewBadRequestError("Failed to create record.", testErr)
 		}
 	}
-
 	record := models.NewRecord(collection)
 	form := forms.NewRecordUpsert(api.app, record)
 	form.SetFullManageAccess(hasFullManageAccess)
-
 	// load request
 	if err := form.LoadRequest(c.Request(), ""); err != nil {
 		return NewBadRequestError("Failed to load the submitted data due to invalid formatting.", err)
 	}
-
 	event := new(core.RecordCreateEvent)
 	event.HttpContext = c
 	event.Collection = collection

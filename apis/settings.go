@@ -14,6 +14,7 @@ import (
 func bindSettingsApi(app core.App, rg *echo.Group) {
 	api := settingsApi{app: app}
 
+	rg.GET("/settings:users", api.getUserSettings, ActivityLogger(app))
 	subGroup := rg.Group("/settings", ActivityLogger(app), RequireAdminAuth())
 	subGroup.GET("", api.list)
 	subGroup.PATCH("", api.set)
@@ -126,6 +127,10 @@ func (api *settingsApi) testEmail(c echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (api *settingsApi) getUserSettings(c echo.Context) error {
+	return c.JSON(http.StatusOK, api.app.Settings().Users)
 }
 
 func (api *settingsApi) generateAppleClientSecret(c echo.Context) error {
